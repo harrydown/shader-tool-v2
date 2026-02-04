@@ -238,6 +238,120 @@ float getChar(float brightness, vec2 p, int style) {
       val = smoothstep(1.8 * blurAmount * sizeMultiplier, 1.3 * sizeMultiplier, dist);
     }
   }
+  else if (style == 6) { // ASCII Characters minimal - actual character patterns
+    vec2 grid5 = floor(p * 5.0); // 5x5 grid for better character definition
+    
+    if (brightness < 0.125) {
+      // Level 1: . (dot) - center pixel only
+      val = (grid5.x == 2.0 && grid5.y == 2.0) ? 1.0 : 0.0;
+    }
+    else if (brightness < 0.25) {
+      // Level 2: : (colon) - two dots vertically
+      val = (grid5.x == 2.0 && (grid5.y == 1.0 || grid5.y == 3.0)) ? 1.0 : 0.0;
+    }
+    else if (brightness < 0.375) {
+      // Level 3: - (dash) - horizontal line
+      val = (grid5.y == 2.0 && grid5.x >= 1.0 && grid5.x <= 3.0) ? 1.0 : 0.0;
+    }
+    else if (brightness < 0.5) {
+      // Level 4: + (plus sign)
+      val = ((grid5.x == 2.0) || (grid5.y == 2.0)) ? 1.0 : 0.0;
+    }
+    else if (brightness < 0.625) {
+      // Level 5: * (asterisk pattern)
+      val = ((grid5.x == 2.0) || (grid5.y == 2.0) || (grid5.x == grid5.y) || (grid5.x + grid5.y == 4.0)) ? 1.0 : 0.0;
+    }
+    else if (brightness < 0.75) {
+      // Level 6: # (hash) - grid pattern
+      val = ((grid5.x == 1.0 || grid5.x == 3.0) || (grid5.y == 1.0 || grid5.y == 3.0)) ? 1.0 : 0.0;
+    }
+    else if (brightness < 0.875) {
+      // Level 7: % (percent) - diagonal pattern with dots
+      val = (grid5.x == grid5.y) ? 1.0 : 0.0;
+      if ((grid5.x == 1.0 && grid5.y == 4.0) || (grid5.x == 3.0 && grid5.y == 0.0)) val = 1.0;
+    }
+    else {
+      // Level 8: @ (at symbol) - outer ring with center detail
+      float dist5 = length(grid5 - 2.0);
+      val = (dist5 > 1.2 && dist5 < 2.2) ? 1.0 : 0.0;
+      if (grid5.x >= 2.0 && grid5.y == 2.0) val = 1.0; // inner detail
+    }
+  }
+  else if (style == 7) { // ASCII Characters normal - 16 brightness levels
+    vec2 grid5 = floor(p * 5.0);
+    
+    if (brightness < 0.0625) {
+      // Level 1: backtick - tiny dot
+      val = (grid5.x == 2.0 && grid5.y == 4.0) ? 1.0 : 0.0;
+    }
+    else if (brightness < 0.125) {
+      // Level 2: . (dot) - center
+      val = (grid5.x == 2.0 && grid5.y == 2.0) ? 1.0 : 0.0;
+    }
+    else if (brightness < 0.1875) {
+      // Level 3: , (comma) - center with tail
+      val = (grid5.x == 2.0 && (grid5.y == 2.0 || grid5.y == 1.0)) ? 1.0 : 0.0;
+    }
+    else if (brightness < 0.25) {
+      // Level 4: - (dash)
+      val = (grid5.y == 2.0 && grid5.x >= 1.0 && grid5.x <= 3.0) ? 1.0 : 0.0;
+    }
+    else if (brightness < 0.3125) {
+      // Level 5: : (colon)
+      val = (grid5.x == 2.0 && (grid5.y == 1.0 || grid5.y == 3.0)) ? 1.0 : 0.0;
+    }
+    else if (brightness < 0.375) {
+      // Level 6: ; (semicolon)
+      val = (grid5.x == 2.0 && (grid5.y == 1.0 || grid5.y == 3.0 || grid5.y == 4.0)) ? 1.0 : 0.0;
+    }
+    else if (brightness < 0.4375) {
+      // Level 7: i (letter i)
+      val = (grid5.x == 2.0 && (grid5.y >= 1.0 && grid5.y <= 3.0)) ? 1.0 : 0.0;
+      if (grid5.x == 2.0 && grid5.y == 4.0) val = 1.0;
+    }
+    else if (brightness < 0.5) {
+      // Level 8: | (pipe)
+      val = (grid5.x == 2.0) ? 1.0 : 0.0;
+    }
+    else if (brightness < 0.5625) {
+      // Level 9: + (plus)
+      val = ((grid5.x == 2.0) || (grid5.y == 2.0)) ? 1.0 : 0.0;
+    }
+    else if (brightness < 0.625) {
+      // Level 10: = (equals)
+      val = ((grid5.y == 1.0 || grid5.y == 3.0) && grid5.x >= 1.0 && grid5.x <= 3.0) ? 1.0 : 0.0;
+    }
+    else if (brightness < 0.6875) {
+      // Level 11: * (asterisk)
+      val = ((grid5.x == 2.0) || (grid5.y == 2.0) || (grid5.x == grid5.y) || (grid5.x + grid5.y == 4.0)) ? 1.0 : 0.0;
+    }
+    else if (brightness < 0.75) {
+      // Level 12: # (hash)
+      val = ((grid5.x == 1.0 || grid5.x == 3.0) || (grid5.y == 1.0 || grid5.y == 3.0)) ? 1.0 : 0.0;
+    }
+    else if (brightness < 0.8125) {
+      // Level 13: % (percent)
+      val = (grid5.x == grid5.y) ? 1.0 : 0.0;
+      if ((grid5.x == 1.0 && grid5.y == 4.0) || (grid5.x == 3.0 && grid5.y == 0.0)) val = 1.0;
+    }
+    else if (brightness < 0.875) {
+      // Level 14: & (ampersand) - S-curve pattern
+      val = (grid5.x + grid5.y == 4.0 || grid5.x == grid5.y) ? 1.0 : 0.0;
+      if (grid5.x == 0.0 && grid5.y == 2.0) val = 1.0;
+    }
+    else if (brightness < 0.9375) {
+      // Level 15: @ (at symbol)
+      float dist5 = length(grid5 - 2.0);
+      val = (dist5 > 1.2 && dist5 < 2.2) ? 1.0 : 0.0;
+      if (grid5.x >= 2.0 && grid5.y == 2.0) val = 1.0;
+    }
+    else {
+      // Level 16: M (letter M) - most complex
+      val = (grid5.x == 0.0 || grid5.x == 4.0) ? 1.0 : 0.0;
+      if ((grid5.x == 1.0 || grid5.x == 3.0) && grid5.y >= 3.0) val = 1.0;
+      if (grid5.x == 2.0 && grid5.y == 4.0) val = 1.0;
+    }
+  }
   
   return val;
 }
@@ -472,7 +586,7 @@ export const AsciiEffect = forwardRef((props, ref) => {
     mousePos = new Vector2(0, 0)
   } = props
 
-  const styleMap = { standard: 0, dense: 1, minimal: 2, blocks: 3, "standard-dots": 4, "melding-dots": 5 }
+  const styleMap = { standard: 0, dense: 1, minimal: 2, blocks: 3, "standard-dots": 4, "melding-dots": 5, "ascii-characters-minimal": 6, "ascii-characters-normal": 7 }
   const styleNum = styleMap[style] || 0
 
   _cellSize = cellSize

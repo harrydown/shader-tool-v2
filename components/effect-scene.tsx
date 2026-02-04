@@ -47,18 +47,18 @@ export function EffectScene() {
   const containerRef = useRef<HTMLDivElement>(null)
   const [mousePos, setMousePos] = useState(new Vector2(0, 0))
   const [resolution, setResolution] = useState(new Vector2(1920, 1080))
-  const [style, setStyle] = useState<"standard" | "dense" | "minimal" | "blocks" | "standard-dots" | "melding-dots">("standard")
+  const [style, setStyle] = useState<"standard" | "dense" | "minimal" | "blocks" | "standard-dots" | "melding-dots" | "ascii-characters-minimal" | "ascii-characters-normal">("standard")
   const [cellSize, setCellSize] = useState(16)
   const [colorMode, setColorMode] = useState(true)
   const [invert, setInvert] = useState(false)
   const [blur, setBlur] = useState(1.0)
   const [minSize, setMinSize] = useState(0.2)
   const [maxSize, setMaxSize] = useState(1.8)
+  const [backgroundColor, setBackgroundColor] = useState("#5c5c5c")
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [showImage, setShowImage] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
   const [originalImageSize, setOriginalImageSize] = useState<{ width: number; height: number } | null>(null)
-  const [showBorder, setShowBorder] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const recordedChunksRef = useRef<Blob[]>([])
@@ -249,6 +249,8 @@ export function EffectScene() {
             <option value="blocks">Blocks</option>
             <option value="standard-dots">Standard - Dots</option>
             <option value="melding-dots">Melding Dots</option>
+            <option value="ascii-characters-minimal">ASCII Characters minimal</option>
+            <option value="ascii-characters-normal">ASCII Characters normal</option>
           </select>
         </div>
 
@@ -311,6 +313,24 @@ export function EffectScene() {
           />
         </div>
 
+        <div style={{ marginBottom: "15px" }}>
+          <label style={{ display: "block", marginBottom: "5px" }}>
+            Background Color
+          </label>
+          <input 
+            type="color" 
+            value={backgroundColor}
+            onChange={(e) => setBackgroundColor(e.target.value)}
+            style={{ 
+              width: "100%",
+              height: "30px",
+              cursor: "pointer",
+              border: "1px solid #555",
+              borderRadius: "4px"
+            }}
+          />
+        </div>
+
         <div style={{ marginBottom: "10px" }}>
           <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
             <input 
@@ -334,20 +354,6 @@ export function EffectScene() {
             Invert
           </label>
         </div>
-
-        {showImage && (
-          <div style={{ marginBottom: "15px" }}>
-            <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
-              <input 
-                type="checkbox" 
-                checked={showBorder}
-                onChange={(e) => setShowBorder(e.target.checked)}
-                style={{ marginRight: "8px" }}
-              />
-              Show Border
-            </label>
-          </div>
-        )}
 
         <div style={{ marginTop: "20px", paddingTop: "20px", borderTop: "1px solid #555" }}>
           <label style={{ display: "block", marginBottom: "10px", fontWeight: "bold" }}>
@@ -475,10 +481,10 @@ export function EffectScene() {
 
       <Canvas
         camera={{ position: [0, 0, 5], fov: 50 }}
-        style={{ background: "#5c5c5c" }}
+        style={{ background: backgroundColor }}
         gl={{ preserveDrawingBuffer: true }}
       >
-        <color attach="background" args={["#5c5c5c"]} />
+        <color attach="background" args={[backgroundColor]} />
 
         {/* Lighting */}
         <hemisphereLight intensity={0.5} />
@@ -531,21 +537,6 @@ export function EffectScene() {
           />
         </EffectComposer>
       </Canvas>
-
-      {/* Green border overlay - renders on top of ASCII effect */}
-      {showImage && originalImageSize && (
-        <div style={{
-          position: "absolute",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%)",
-          width: `${(originalImageSize.width / 1000) * 396}px`,
-          height: `${(originalImageSize.height / 1000) * 396}px`,
-          border: "1px solid #00ff00",
-          pointerEvents: "none",
-          zIndex: 999
-        }} />
-      )}
 
       {/* Dimensions Display */}
       {(showImage || true) && (

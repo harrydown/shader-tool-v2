@@ -74,3 +74,39 @@ Organic blob effect where adjacent dots connect and meld together at higher brig
 - **Brightest** (≥ 0.8): Maximum size circle - complete melding
 
 Creates metaball-like effects where circular shapes merge and form organic, connected patterns when brightness is high enough. Uses smoothstep for natural blur and soft edges. Small dots remain separate, large dots overlap and flow together while maintaining circular forms.
+
+## ASCII Characters minimal
+Actual ASCII character patterns rendered in a 5×5 grid with 8 distinct brightness levels
+
+- **Level 1** (< 0.125): `.` (dot) - single center pixel
+- **Level 2** (0.125 - 0.25): `:` (colon) - two vertical dots
+- **Level 3** (0.25 - 0.375): `-` (dash) - horizontal line
+- **Level 4** (0.375 - 0.5): `+` (plus) - horizontal and vertical cross
+- **Level 5** (0.5 - 0.625): `*` (asterisk) - plus with diagonals
+- **Level 6** (0.625 - 0.75): `#` (hash) - grid pattern
+- **Level 7** (0.75 - 0.875): `%` (percent) - diagonal line with dots
+- **Level 8** (≥ 0.875): `@` (at symbol) - circular ring with center detail
+
+Uses pixel-perfect patterns within each cell to approximate Courier New-style monospace ASCII characters. Each character is designed to be recognizable in the 5×5 grid while maintaining clear visual progression from dark to bright. All levels use actual character patterns - no full blocks.
+
+## ASCII Characters normal
+Comprehensive ASCII character set with 16 distinct brightness levels for fine-grained shading
+
+- **Level 1** (< 0.0625): `` ` `` (backtick) - tiny top dot
+- **Level 2** (0.0625 - 0.125): `.` (dot) - center pixel
+- **Level 3** (0.125 - 0.1875): `,` (comma) - dot with tail
+- **Level 4** (0.1875 - 0.25): `-` (dash) - horizontal line
+- **Level 5** (0.25 - 0.3125): `:` (colon) - two vertical dots
+- **Level 6** (0.3125 - 0.375): `;` (semicolon) - colon with tail
+- **Level 7** (0.375 - 0.4375): `i` (letter i) - vertical line with dot
+- **Level 8** (0.4375 - 0.5): `|` (pipe) - full vertical line
+- **Level 9** (0.5 - 0.5625): `+` (plus) - cross
+- **Level 10** (0.5625 - 0.625): `=` (equals) - double horizontal lines
+- **Level 11** (0.625 - 0.6875): `*` (asterisk) - 8-way pattern
+- **Level 12** (0.6875 - 0.75): `#` (hash) - grid pattern
+- **Level 13** (0.75 - 0.8125): `%` (percent) - diagonal with dots
+- **Level 14** (0.8125 - 0.875): `&` (ampersand) - S-curve pattern
+- **Level 15** (0.875 - 0.9375): `@` (at symbol) - ring with detail
+- **Level 16** (≥ 0.9375): `M` (letter M) - complex letter form
+
+Provides the most granular ASCII shading with 16 distinct characters, enabling smooth tonal gradations and detailed rendering. Classic ASCII art character progression optimized for visual density and recognizability.
