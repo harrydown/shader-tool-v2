@@ -41,6 +41,19 @@ uniform float glitchIntensity;
 uniform float glitchFrequency;
 uniform float brightnessAdjust;
 uniform float contrastAdjust;
+uniform float saturationAdjust;
+uniform vec3 backgroundColor;
+uniform float cellDensity;
+uniform float randomSeed;
+uniform int densityMask;
+uniform float gradientMidpoint;
+uniform float densityStart;
+uniform float densityEnd;
+uniform sampler2D densityMaskTexture;
+uniform bool hasDensityMaskTexture;
+uniform float maskScale;
+uniform float maskOffsetX;
+uniform float maskOffsetY;
 
 // Helper functions
 float random(vec2 st) {
@@ -394,9 +407,6 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
     sampledColor = texture(inputBuffer, workUV);
   }
 
-  // Contrast and brightness
-  sampledColor.rgb = (sampledColor.rgb - 0.5) * contrastAdjust + 0.5 + brightnessAdjust;
-
   // Time-based noise
   if (noiseIntensity > 0.0) {
     float noiseVal = noise(workUV * noiseScale + time * noiseSpeed);
@@ -425,12 +435,85 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
 
   vec2 cellUV = (cellCoord + 0.5) / cellCount;
   vec4 cellColor = texture(inputBuffer, cellUV);
+  
+  // Apply brightness, contrast, and saturation to cellColor (only if not background)
+  float bgDiff = length(cellColor.rgb - backgroundColor);
+  if (bgDiff > 0.01) {
+    cellColor.rgb = (cellColor.rgb - 0.5) * contrastAdjust + 0.5 + brightnessAdjust;
+    float cellLum = dot(cellColor.rgb, vec3(0.299, 0.587, 0.114));
+    cellColor.rgb = mix(vec3(cellLum), cellColor.rgb, saturationAdjust);
+  }
+  
   float brightness = dot(cellColor.rgb, vec3(0.299, 0.587, 0.114));
 
   if (invert) brightness = 1.0 - brightness;
 
   vec2 localUV = fract(uv * cellCount);
   float charValue = getChar(brightness, localUV, asciiStyle);
+
+  // Cell density - randomly hide cells based on density value
+  if (densityMask > 0) {
+    float effectiveDensity = cellDensity;
+    
+    // Apply image mask
+    if (densityMask == 7 && hasDensityMaskTexture) {
+      // Calculate aspect-corrected UV to prevent stretching
+      vec2 centeredUV = uv - 0.5;
+      
+      // Mask aspect ratio from loaded texture
+      float logoAspect = 0.8467;
+      // Viewport aspect ratio
+      float viewportAspect = resolution.x / resolution.y;
+      
+      // Since logo is narrower than viewport, compress the width on screen
+      // by expanding the X sampling range
+      float aspectRatio = viewportAspect / logoAspect;
+      centeredUV.x *= aspectRatio; // Expand X sampling to make logo appear narrower
+      
+      // Apply position offset (invert X for intuitive direction)
+      centeredUV.x -= maskOffsetX;
+      centeredUV.y += maskOffsetY;
+      
+      vec2 maskUV = centeredUV / maskScale + 0.5;
+      
+      // Check if UV is out of bounds - if so, use densityStart (transparent)
+      if (maskUV.x < 0.0 || maskUV.x > 1.0 || maskUV.y < 0.0 || maskUV.y > 1.0) {
+        effectiveDensity = densityStart;
+      } else {
+        vec4 maskColor = texture(densityMaskTexture, maskUV);
+        float maskBrightness = maskColor.a; // Use alpha channel (transparency) - transparent = 0, opaque = 1
+        effectiveDensity = mix(densityStart, densityEnd, maskBrightness);
+      }
+    }
+    // Apply gradient mask
+    else if (densityMask > 1) { // Gradient modes
+      float gradientValue = 0.0;
+      float adjustedMidpoint = gradientMidpoint * 2.0; // Map 0-1 to 0-2 range
+      
+      if (densityMask == 2) { // Gradient: Up (start at top, end at bottom)
+        gradientValue = smoothstep(0.0, adjustedMidpoint, uv.y);
+      } else if (densityMask == 3) { // Gradient: Down (start at bottom, end at top)
+        gradientValue = smoothstep(0.0, adjustedMidpoint, 1.0 - uv.y);
+      } else if (densityMask == 4) { // Gradient: Left (start at left, end at right)
+        gradientValue = smoothstep(0.0, adjustedMidpoint, uv.x);
+      } else if (densityMask == 5) { // Gradient: Right (start at right, end at left)
+        gradientValue = smoothstep(0.0, adjustedMidpoint, 1.0 - uv.x);
+      } else if (densityMask == 6) { // Gradient: Radial (start at center, end at edge)
+        vec2 center = vec2(0.5, 0.5);
+        float dist = distance(uv, center);
+        float maxDist = 0.707; // Distance from center to corner (sqrt(0.5^2 + 0.5^2))
+        float normalizedDist = dist / maxDist;
+        gradientValue = smoothstep(0.0, adjustedMidpoint, normalizedDist);
+      }
+      
+      effectiveDensity = mix(densityStart, densityEnd, gradientValue);
+    }
+    
+    float cellRandom = random(cellCoord + vec2(randomSeed));
+    if (cellRandom > (effectiveDensity / 100.0)) {
+      charValue = 0.0;
+    }
+  }
 
   vec3 finalColor;
   if (colorMode) {
@@ -479,6 +562,21 @@ let _minSize = 0.2
 let _maxSize = 1.8
 let _resolution = new Vector2(1920, 1080)
 let _mousePos = new Vector2(0, 0)
+let _brightnessAdjust = 0
+let _contrastAdjust = 1
+let _saturationAdjust = 1
+let _backgroundColor = [0.36, 0.36, 0.36]
+let _cellDensity = 100
+let _randomSeed = 0
+let _densityMask = 0
+let _gradientMidpoint = 0.5
+let _densityStart = 0
+let _densityEnd = 100
+let _maskTexture = null
+let _hasMaskTexture = false
+let _maskScale = 1.0
+let _maskOffsetX = 0.0
+let _maskOffsetY = 0.0
 
 class AsciiEffectImpl extends Effect {
   constructor(options) {
@@ -531,6 +629,19 @@ class AsciiEffectImpl extends Effect {
         ["glitchFrequency", new Uniform(postfx.glitchFrequency || 0)],
         ["brightnessAdjust", new Uniform(postfx.brightnessAdjust || 0)],
         ["contrastAdjust", new Uniform(postfx.contrastAdjust || 1)],
+        ["saturationAdjust", new Uniform(postfx.saturationAdjust || 1)],
+        ["backgroundColor", new Uniform(postfx.backgroundColor || [0.36, 0.36, 0.36])],
+        ["cellDensity", new Uniform(postfx.cellDensity || 100)],
+        ["randomSeed", new Uniform(postfx.randomSeed || 0)],
+        ["densityMask", new Uniform(postfx.densityMask || 0)],
+        ["gradientMidpoint", new Uniform(postfx.gradientMidpoint || 0.5)],
+        ["densityStart", new Uniform(postfx.densityStart || 0)],
+        ["densityEnd", new Uniform(postfx.densityEnd || 100)],
+        ["densityMaskTexture", new Uniform(postfx.densityMaskTexture || null)],
+        ["hasDensityMaskTexture", new Uniform(postfx.hasDensityMaskTexture || false)],
+        ["maskScale", new Uniform(postfx.maskScale || 1.0)],
+        ["maskOffsetX", new Uniform(postfx.maskOffsetX || 0.0)],
+        ["maskOffsetY", new Uniform(postfx.maskOffsetY || 0.0)],
       ]),
     })
 
@@ -543,6 +654,21 @@ class AsciiEffectImpl extends Effect {
     _maxSize = maxSize
     _resolution = resolution
     _mousePos = mousePos
+    _brightnessAdjust = postfx.brightnessAdjust || 0
+    _contrastAdjust = postfx.contrastAdjust || 1
+    _saturationAdjust = postfx.saturationAdjust || 1
+    _backgroundColor = postfx.backgroundColor || [0.36, 0.36, 0.36]
+    _cellDensity = postfx.cellDensity || 100
+    _randomSeed = postfx.randomSeed || 0
+    _densityMask = postfx.densityMask || 0
+    _gradientMidpoint = postfx.gradientMidpoint || 0.5
+    _densityStart = postfx.densityStart || 0
+    _densityEnd = postfx.densityEnd || 100
+    _maskTexture = postfx.densityMaskTexture || null
+    _hasMaskTexture = postfx.hasDensityMaskTexture || false
+    _maskScale = postfx.maskScale || 1.0
+    _maskOffsetX = postfx.maskOffsetX || 0.0
+    _maskOffsetY = postfx.maskOffsetY || 0.0
   }
 
   update(renderer, inputBuffer, deltaTime) {
@@ -569,6 +695,21 @@ class AsciiEffectImpl extends Effect {
     this.uniforms.get("maxSize").value = _maxSize
     this.uniforms.get("resolution").value = _resolution
     this.uniforms.get("mousePos").value = _mousePos
+    this.uniforms.get("brightnessAdjust").value = _brightnessAdjust
+    this.uniforms.get("contrastAdjust").value = _contrastAdjust
+    this.uniforms.get("saturationAdjust").value = _saturationAdjust
+    this.uniforms.get("backgroundColor").value = _backgroundColor
+    this.uniforms.get("cellDensity").value = _cellDensity
+    this.uniforms.get("randomSeed").value = _randomSeed
+    this.uniforms.get("densityMask").value = _densityMask
+    this.uniforms.get("gradientMidpoint").value = _gradientMidpoint
+    this.uniforms.get("densityStart").value = _densityStart
+    this.uniforms.get("densityEnd").value = _densityEnd
+    this.uniforms.get("densityMaskTexture").value = _maskTexture
+    this.uniforms.get("hasDensityMaskTexture").value = _hasMaskTexture
+    this.uniforms.get("maskScale").value = _maskScale
+    this.uniforms.get("maskOffsetX").value = _maskOffsetX
+    this.uniforms.get("maskOffsetY").value = _maskOffsetY
   }
 }
 
@@ -598,6 +739,30 @@ export const AsciiEffect = forwardRef((props, ref) => {
   _maxSize = maxSize
   _resolution = resolution
   _mousePos = mousePos
+  _brightnessAdjust = postfx.brightnessAdjust || 0
+  _contrastAdjust = postfx.contrastAdjust || 1
+  _saturationAdjust = postfx.saturationAdjust || 1
+  _backgroundColor = postfx.backgroundColor || [0.36, 0.36, 0.36]
+  _cellDensity = postfx.cellDensity || 100
+  _randomSeed = postfx.randomSeed || 0
+  _densityMask = postfx.densityMask || 0
+  _gradientMidpoint = postfx.gradientMidpoint || 0.5
+  _densityStart = postfx.densityStart || 0
+  _densityEnd = postfx.densityEnd || 100
+  _maskTexture = postfx.densityMaskTexture || null
+  _hasMaskTexture = postfx.hasDensityMaskTexture || false
+  _maskScale = postfx.maskScale || 1.0
+  _maskOffsetX = postfx.maskOffsetX || 0.0
+  _maskOffsetY = postfx.maskOffsetY || 0.0
+
+  console.log('AsciiEffect props:', { 
+    brightness: postfx.brightnessAdjust, 
+    contrast: postfx.contrastAdjust, 
+    saturation: postfx.saturationAdjust,
+    _brightnessAdjust,
+    _contrastAdjust,
+    _saturationAdjust
+  })
 
   const effect = useMemo(
     () => new AsciiEffectImpl({ cellSize, invert, color, style: styleNum, blur, minSize, maxSize, postfx, resolution, mousePos }),

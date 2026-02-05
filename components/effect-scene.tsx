@@ -1,20 +1,41 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { Canvas, useFrame, useLoader } from "@react-three/fiber"
+import { Canvas, useFrame, useLoader, useThree } from "@react-three/fiber"
 import { EffectComposer } from "@react-three/postprocessing"
 import { OrbitControls } from "@react-three/drei"
-import { Vector2, TextureLoader } from "three"
+import { Vector2, TextureLoader, Box3, Vector3 } from "three"
 import * as THREE from "three"
 import { AsciiEffect } from "./ascii-effect"
 
-function RotatingMesh() {
+function RotatingMesh({ onBoundsUpdate }: { onBoundsUpdate?: (bounds: { x: number; y: number; width: number; height: number }) => void }) {
   const meshRef = useRef<THREE.Mesh>(null)
+  const { camera, size, gl } = useThree()
 
   useFrame((state, delta) => {
     if (meshRef.current) {
       meshRef.current.rotation.x += delta * 0.3
       meshRef.current.rotation.y += delta * 0.5
+
+      // Calculate screen bounds
+      if (onBoundsUpdate) {
+        const box = new Box3().setFromObject(meshRef.current)
+        const min = new Vector3()
+        const max = new Vector3()
+        box.getCenter(min)
+        box.getSize(max)
+        
+        // Project to screen coordinates
+        const minScreen = min.clone().sub(max.clone().multiplyScalar(0.5)).project(camera)
+        const maxScreen = min.clone().add(max.clone().multiplyScalar(0.5)).project(camera)
+        
+        const x = (minScreen.x * 0.5 + 0.5) * size.width
+        const y = (1 - (maxScreen.y * 0.5 + 0.5)) * size.height
+        const width = (maxScreen.x - minScreen.x) * 0.5 * size.width
+        const height = (maxScreen.y - minScreen.y) * 0.5 * size.height
+        
+        onBoundsUpdate({ x, y, width, height })
+      }
     }
   })
 
@@ -26,8 +47,31 @@ function RotatingMesh() {
   )
 }
 
-function ImagePlane({ imageUrl, dimensions }: { imageUrl: string | null; dimensions: { width: number; height: number } | null }) {
+function ImagePlane({ imageUrl, dimensions, onBoundsUpdate }: { imageUrl: string | null; dimensions: { width: number; height: number } | null; onBoundsUpdate?: (bounds: { x: number; y: number; width: number; height: number }) => void }) {
   const texture = imageUrl ? useLoader(TextureLoader, imageUrl) : null
+  const meshRef = useRef<THREE.Mesh>(null)
+  const { camera, size } = useThree()
+
+  useFrame(() => {
+    if (meshRef.current && onBoundsUpdate) {
+      const box = new Box3().setFromObject(meshRef.current)
+      const min = new Vector3()
+      const max = new Vector3()
+      box.getCenter(min)
+      box.getSize(max)
+      
+      // Project to screen coordinates
+      const minScreen = min.clone().sub(max.clone().multiplyScalar(0.5)).project(camera)
+      const maxScreen = min.clone().add(max.clone().multiplyScalar(0.5)).project(camera)
+      
+      const x = (minScreen.x * 0.5 + 0.5) * size.width
+      const y = (1 - (maxScreen.y * 0.5 + 0.5)) * size.height
+      const width = (maxScreen.x - minScreen.x) * 0.5 * size.width
+      const height = (maxScreen.y - minScreen.y) * 0.5 * size.height
+      
+      onBoundsUpdate({ x, y, width, height })
+    }
+  })
 
   if (!imageUrl || !texture || !dimensions) return null
 
@@ -36,10 +80,42 @@ function ImagePlane({ imageUrl, dimensions }: { imageUrl: string | null; dimensi
   const planeHeight = dimensions.height / 1000
 
   return (
-    <mesh>
+    <mesh ref={meshRef}>
       <planeGeometry args={[planeWidth, planeHeight]} />
       <meshBasicMaterial map={texture} transparent={true} alphaTest={0.01} />
     </mesh>
+  )
+}
+
+function AsciiEffectWithMask({ maskImageUrl, maskScale, densityMask, onMaskLoad, ...props }: any) {
+  // Use logo for logo-mask, or user-provided image for image-mask
+  const textureUrl = densityMask === "logo-mask" ? "/Syndica-Logo-White.svg" : maskImageUrl;
+  const maskTexture = textureUrl ? useLoader(TextureLoader, textureUrl) : null;
+
+  // Configure texture to prevent stretching and streaking
+  if (maskTexture) {
+    maskTexture.wrapS = THREE.ClampToEdgeWrapping;
+    maskTexture.wrapT = THREE.ClampToEdgeWrapping;
+    maskTexture.minFilter = THREE.LinearFilter;
+    maskTexture.magFilter = THREE.LinearFilter;
+    maskTexture.needsUpdate = true;
+    
+    // Report dimensions
+    if (onMaskLoad && maskTexture.image) {
+      onMaskLoad({ width: maskTexture.image.width, height: maskTexture.image.height });
+    }
+  }
+
+  return (
+    <AsciiEffect
+      {...props}
+      postfx={{
+        ...props.postfx,
+        densityMaskTexture: maskTexture,
+        hasDensityMaskTexture: !!maskTexture,
+        maskScale: maskScale,
+      }}
+    />
   )
 }
 
@@ -55,10 +131,27 @@ export function EffectScene() {
   const [minSize, setMinSize] = useState(0.2)
   const [maxSize, setMaxSize] = useState(1.8)
   const [backgroundColor, setBackgroundColor] = useState("#5c5c5c")
+  const [brightness, setBrightness] = useState(0)
+  const [contrast, setContrast] = useState(1)
+  const [saturation, setSaturation] = useState(1)
+  const [cellDensity, setCellDensity] = useState(100)
+  const [densityStart, setDensityStart] = useState(0)
+  const [densityEnd, setDensityEnd] = useState(100)
+  const [randomSeed, setRandomSeed] = useState(0)
+  const [densityMask, setDensityMask] = useState<"none" | "uniform" | "gradient-linear" | "gradient-radial" | "logo-mask" | "image-mask">("none");
+  const [gradientDirection, setGradientDirection] = useState<"up" | "down" | "left" | "right">("up");
+  const [gradientMidpoint, setGradientMidpoint] = useState(0.5)
+  const [maskImageUrl, setMaskImageUrl] = useState<string | null>(null)
+  const [maskScale, setMaskScale] = useState(1.0)
+  const [maskOffsetX, setMaskOffsetX] = useState(0.0)
+  const [maskOffsetY, setMaskOffsetY] = useState(0.0)
+  const [maskDimensions, setMaskDimensions] = useState<{ width: number; height: number } | null>(null)
+  const [maskRenderedSize, setMaskRenderedSize] = useState<{ width: number; height: number } | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [showImage, setShowImage] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
   const [originalImageSize, setOriginalImageSize] = useState<{ width: number; height: number } | null>(null)
+  const [mediaBounds, setMediaBounds] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const recordedChunksRef = useRef<Blob[]>([])
@@ -92,6 +185,31 @@ export function EffectScene() {
       }
     }
   }, [])
+
+  // Calculate rendered mask size whenever relevant parameters change
+  useEffect(() => {
+    if ((densityMask === "logo-mask" || densityMask === "image-mask") && maskDimensions) {
+      const logoAspect = maskDimensions.width / maskDimensions.height;
+      const resX = resolution.x;
+      const resY = resolution.y;
+      const viewportAspect = resX / resY;
+      
+      // Based on shader logic: centeredUV.y *= viewportAspect / logoAspect
+      // This expands Y sampling, which means mask covers less height
+      const yScale = logoAspect / viewportAspect;
+      
+      // At maskScale=1.0, the mask covers the full width and adjusted height
+      // Shader receives maskScale / 2, so divide here as well
+      const actualScale = maskScale / 2.0;
+      const renderedHeight = resY * yScale / actualScale;
+      const renderedWidth = renderedHeight * logoAspect;
+      
+      setMaskRenderedSize({ width: renderedWidth, height: renderedHeight });
+    } else {
+      setMaskRenderedSize(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [densityMask, maskDimensions?.width ?? 0, maskDimensions?.height ?? 0, maskScale, resolution.x, resolution.y]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -135,26 +253,38 @@ export function EffectScene() {
     }
   }
 
-  const captureAtImageSize = () => {
-    if (!originalImageSize) return
+  const captureMedia = () => {
+    if (!mediaBounds) return
     
     const sourceCanvas = containerRef.current?.querySelector('canvas') as HTMLCanvasElement
     if (!sourceCanvas) return
     
     // Wait for next frame to ensure canvas is rendered
     requestAnimationFrame(() => {
-      // Create temporary canvas at original image dimensions
+      // Create temporary canvas at media dimensions
       const tempCanvas = document.createElement('canvas')
-      tempCanvas.width = originalImageSize.width
-      tempCanvas.height = originalImageSize.height
+      tempCanvas.width = Math.round(mediaBounds.width)
+      tempCanvas.height = Math.round(mediaBounds.height)
       const ctx = tempCanvas.getContext('2d')
       
       if (!ctx) return
       
-      // Scale and draw the source canvas to match original image dimensions
+      // Extract just the media portion from the source canvas
       ctx.imageSmoothingEnabled = true
       ctx.imageSmoothingQuality = 'high'
-      ctx.drawImage(sourceCanvas, 0, 0, originalImageSize.width, originalImageSize.height)
+      
+      // Draw only the media bounds area
+      ctx.drawImage(
+        sourceCanvas,
+        Math.round(mediaBounds.x), // source x
+        Math.round(mediaBounds.y), // source y
+        Math.round(mediaBounds.width), // source width
+        Math.round(mediaBounds.height), // source height
+        0, // destination x
+        0, // destination y
+        Math.round(mediaBounds.width), // destination width
+        Math.round(mediaBounds.height) // destination height
+      )
       
       // Download the image
       tempCanvas.toBlob((blob) => {
@@ -162,7 +292,7 @@ export function EffectScene() {
           const url = URL.createObjectURL(blob)
           const a = document.createElement('a')
           a.href = url
-          a.download = `ascii-art-${originalImageSize.width}x${originalImageSize.height}-${Date.now()}.png`
+          a.download = `ascii-media-${Math.round(mediaBounds.width)}x${Math.round(mediaBounds.height)}-${Date.now()}.png`
           a.click()
           URL.revokeObjectURL(url)
         }
@@ -211,6 +341,28 @@ export function EffectScene() {
     }
   }
 
+  const resetSettings = () => {
+    setStyle("standard")
+    setCellSize(16)
+    setColorMode(true)
+    setInvert(false)
+    setBlur(1.0)
+    setMinSize(0.2)
+    setMaxSize(1.8)
+    setBackgroundColor("#5c5c5c")
+    setBrightness(0)
+    setContrast(1)
+    setSaturation(1)
+    setCellDensity(100)
+    setDensityStart(0)
+    setDensityEnd(100)
+    setDensityMask("none")
+    setGradientMidpoint(0.5)
+    setMaskScale(1.0)
+    setMaskOffsetX(0.0)
+    setMaskOffsetY(0.0)
+  }
+
   return (
     <div ref={containerRef} style={{ width: "100%", height: "100vh", position: "relative" }}>
       {/* Control Panel */}
@@ -225,9 +377,25 @@ export function EffectScene() {
         fontFamily: "monospace",
         fontSize: "14px",
         zIndex: 1000,
-        minWidth: "200px"
+        width: "360px"
       }}>
-        <h3 style={{ margin: "0 0 15px 0", fontSize: "16px" }}>ASCII Controls</h3>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
+          <h3 style={{ margin: "0", fontSize: "16px" }}>Shader Controls</h3>
+          <button
+            onClick={resetSettings}
+            style={{
+              padding: "4px 8px",
+              background: "#444",
+              color: "white",
+              border: "1px solid #666",
+              borderRadius: "4px",
+              cursor: "pointer",
+              fontSize: "12px"
+            }}
+          >
+            Reset
+          </button>
+        </div>
         
         <div style={{ marginBottom: "15px" }}>
           <label style={{ display: "block", marginBottom: "5px" }}>Style</label>
@@ -313,6 +481,280 @@ export function EffectScene() {
           />
         </div>
 
+        <div style={{ marginBottom: "20px", paddingBottom: "15px", borderBottom: "1px solid #555" }}>
+          <label style={{ display: "block", marginBottom: "10px", fontWeight: "bold", color: "#aaf" }}>
+            Cell Density
+          </label>
+          <div style={{ marginBottom: "15px" }}>
+            <label style={{ display: "block", marginBottom: "5px" }}>
+              Density Mask
+            </label>
+            <select 
+              value={densityMask} 
+              onChange={(e) => setDensityMask(e.target.value as any)}
+              style={{
+                width: "100%",
+                padding: "5px",
+                background: "#333",
+                color: "white",
+                border: "1px solid #555",
+                borderRadius: "4px",
+                marginBottom: "10px"
+              }}
+            >
+              <option value="none">None</option>
+              <option value="uniform">Uniform</option>
+              <option value="gradient-linear">Gradient: Linear</option>
+              <option value="gradient-radial">Gradient: Radial</option>
+              <option value="logo-mask">Logo Mask</option>
+              <option value="image-mask">Custom Image Mask</option>
+            </select>
+          </div>
+          {densityMask === "gradient-linear" && (
+            <div style={{ marginBottom: "15px" }}>
+              <label style={{ display: "block", marginBottom: "5px" }}>
+                Direction
+              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "5px" }}>
+                <button
+                  onClick={() => setGradientDirection("up")}
+                  style={{
+                    padding: "8px",
+                    background: gradientDirection === "up" ? "#4a7aff" : "#333",
+                    color: "white",
+                    border: "1px solid #555",
+                    borderRadius: "4px",
+                    cursor: "pointer",
+                    fontSize: "16px"
+                  }}
+                >
+                  ↑
+                </button>
+                <button
+                  onClick={() => setGradientDirection("down")}
+                  style={{
+                    padding: "8px",
+                    background: gradientDirection === "down" ? "#4a7aff" : "#333",
+                    color: "white",
+                    border: "1px solid #555",
+                    borderRadius: "4px",
+                    cursor: "pointer",
+                    fontSize: "16px"
+                  }}
+                >
+                  ↓
+                </button>
+                <button
+                  onClick={() => setGradientDirection("left")}
+                  style={{
+                    padding: "8px",
+                    background: gradientDirection === "left" ? "#4a7aff" : "#333",
+                    color: "white",
+                    border: "1px solid #555",
+                    borderRadius: "4px",
+                    cursor: "pointer",
+                    fontSize: "16px"
+                  }}
+                >
+                  ←
+                </button>
+                <button
+                  onClick={() => setGradientDirection("right")}
+                  style={{
+                    padding: "8px",
+                    background: gradientDirection === "right" ? "#4a7aff" : "#333",
+                    color: "white",
+                    border: "1px solid #555",
+                    borderRadius: "4px",
+                    cursor: "pointer",
+                    fontSize: "16px"
+                  }}
+                >
+                  →
+                </button>
+              </div>
+            </div>
+          )}
+          {densityMask === "image-mask" && (
+            <>
+              <div style={{ marginBottom: "15px" }}>
+                <label style={{ display: "block", marginBottom: "5px" }}>
+                  Mask Image
+                </label>
+                <input 
+                  type="file" 
+                  accept="image/*,.svg"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) {
+                      const url = URL.createObjectURL(file)
+                      setMaskImageUrl(url)
+                    }
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: "5px",
+                    background: "#333",
+                    color: "white",
+                    border: "1px solid #555",
+                    borderRadius: "4px",
+                    fontSize: "12px",
+                    marginBottom: "10px"
+                  }}
+                />
+              </div>
+            </>
+          )}
+          {(densityMask === "logo-mask" || densityMask === "image-mask") && (
+            <>
+              <div style={{ marginBottom: "15px" }}>
+                <label style={{ display: "block", marginBottom: "5px" }}>
+                  Mask Scale: {maskScale.toFixed(2)}x
+                </label>
+                <input 
+                  type="range" 
+                  min="0.1" 
+                  max="10" 
+                  step="0.1"
+                  value={maskScale}
+                  onChange={(e) => setMaskScale(Number(e.target.value))}
+                  style={{ width: "100%" }}
+                />
+              </div>
+              <div style={{ marginBottom: "15px" }}>
+                <label style={{ display: "block", marginBottom: "5px" }}>
+                  Position X: {maskOffsetX.toFixed(2)}
+                </label>
+                <input 
+                  type="range" 
+                  min="-2" 
+                  max="2" 
+                  step="0.01"
+                  value={maskOffsetX}
+                  onChange={(e) => setMaskOffsetX(Number(e.target.value))}
+                  style={{ width: "100%" }}
+                />
+              </div>
+              <div style={{ marginBottom: "15px" }}>
+                <label style={{ display: "block", marginBottom: "5px" }}>
+                  Position Y: {maskOffsetY.toFixed(2)}
+                </label>
+                <input 
+                  type="range" 
+                  min="-2" 
+                  max="2" 
+                  step="0.01"
+                  value={maskOffsetY}
+                  onChange={(e) => setMaskOffsetY(Number(e.target.value))}
+                  style={{ width: "100%" }}
+                />
+              </div>
+              <div style={{ marginBottom: "15px" }}>
+                <label style={{ display: "block", marginBottom: "5px" }}>
+                  Density Start: {densityStart}%
+                </label>
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="100" 
+                  value={densityStart}
+                  onChange={(e) => setDensityStart(Number(e.target.value))}
+                  style={{ width: "100%" }}
+                />
+              </div>
+              <div style={{ marginBottom: "15px" }}>
+                <label style={{ display: "block", marginBottom: "5px" }}>
+                  Density End: {densityEnd}%
+                </label>
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="100" 
+                  value={densityEnd}
+                  onChange={(e) => setDensityEnd(Number(e.target.value))}
+                  style={{ width: "100%" }}
+                />
+              </div>
+            </>
+          )}
+          {densityMask === "gradient-linear" && (
+            <>
+              <div style={{ marginBottom: "15px" }}>
+                <label style={{ display: "block", marginBottom: "5px" }}>
+                  Density Start: {densityStart}%
+                </label>
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="100" 
+                  value={densityStart}
+                  onChange={(e) => setDensityStart(Number(e.target.value))}
+                  style={{ width: "100%" }}
+                />
+              </div>
+              <div style={{ marginBottom: "15px" }}>
+                <label style={{ display: "block", marginBottom: "5px" }}>
+                  Density End: {densityEnd}%
+                </label>
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="100" 
+                  value={densityEnd}
+                  onChange={(e) => setDensityEnd(Number(e.target.value))}
+                  style={{ width: "100%" }}
+                />
+              </div>
+              <div style={{ marginBottom: "15px" }}>
+                <label style={{ display: "block", marginBottom: "5px" }}>
+                  Gradient Midpoint: {(gradientMidpoint * 100).toFixed(0)}%
+                </label>
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="1" 
+                  step="0.01"
+                  value={gradientMidpoint}
+                  onChange={(e) => setGradientMidpoint(Number(e.target.value))}
+                  style={{ width: "100%" }}
+                />
+              </div>
+            </>
+          )}
+          {densityMask === "uniform" && (
+            <div style={{ marginBottom: "15px" }}>
+              <label style={{ display: "block", marginBottom: "5px" }}>
+                Density: {cellDensity}%
+              </label>
+              <input 
+                type="range" 
+                min="0" 
+                max="100" 
+                value={cellDensity}
+                onChange={(e) => setCellDensity(Number(e.target.value))}
+                style={{ width: "100%" }}
+              />
+            </div>
+          )}
+          {densityMask !== "none" && (
+            <button
+              onClick={() => setRandomSeed(Math.random() * 1000)}
+              style={{
+                width: "100%",
+                padding: "6px",
+                background: "#7a5fc9",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
+                fontSize: "12px"
+              }}
+            >
+              🎲 Randomise Pattern
+            </button>
+          )}
+        </div>
+
         <div style={{ marginBottom: "15px" }}>
           <label style={{ display: "block", marginBottom: "5px" }}>
             Background Color
@@ -328,6 +770,50 @@ export function EffectScene() {
               border: "1px solid #555",
               borderRadius: "4px"
             }}
+          />
+        </div>
+        <div style={{ marginBottom: "15px" }}>
+          <label style={{ display: "block", marginBottom: "5px" }}>
+            Brightness: {brightness.toFixed(2)}
+          </label>
+          <input 
+            type="range" 
+            min="-0.5" 
+            max="0.5" 
+            step="0.01"
+            value={brightness}
+            onChange={(e) => setBrightness(Number(e.target.value))}
+            style={{ width: "100%" }}
+          />
+        </div>
+
+        <div style={{ marginBottom: "15px" }}>
+          <label style={{ display: "block", marginBottom: "5px" }}>
+            Contrast: {contrast.toFixed(2)}
+          </label>
+          <input 
+            type="range" 
+            min="0.5" 
+            max="2" 
+            step="0.01"
+            value={contrast}
+            onChange={(e) => setContrast(Number(e.target.value))}
+            style={{ width: "100%" }}
+          />
+        </div>
+
+        <div style={{ marginBottom: "15px" }}>
+          <label style={{ display: "block", marginBottom: "5px" }}>
+            Saturation: {saturation.toFixed(2)}
+          </label>
+          <input 
+            type="range" 
+            min="0" 
+            max="2" 
+            step="0.01"
+            value={saturation}
+            onChange={(e) => setSaturation(Number(e.target.value))}
+            style={{ width: "100%" }}
           />
         </div>
 
@@ -373,11 +859,11 @@ export function EffectScene() {
               marginBottom: "8px"
             }}
           >
-            📷 Capture Image
+            📷 Capture Window
           </button>
-          {showImage && originalImageSize && (
+          {mediaBounds && (
             <button
-              onClick={captureAtImageSize}
+              onClick={captureMedia}
               style={{
                 width: "100%",
                 padding: "8px",
@@ -390,7 +876,7 @@ export function EffectScene() {
                 marginBottom: "8px"
               }}
             >
-              📐 Capture at Original Size ({originalImageSize.width}×{originalImageSize.height})
+              📐 Capture Media ({Math.round(mediaBounds.width)}×{Math.round(mediaBounds.height)})
             </button>
           )}
           {!isRecording ? (
@@ -492,14 +978,18 @@ export function EffectScene() {
         <directionalLight position={[-5, 3, -5]} intensity={1.2} />
 
         {/* 3D Model */}
-        {!showImage && <RotatingMesh />}
-        {showImage && <ImagePlane imageUrl={imageUrl} dimensions={originalImageSize} />}
+        {!showImage && <RotatingMesh onBoundsUpdate={setMediaBounds} />}
+        {showImage && <ImagePlane imageUrl={imageUrl} dimensions={originalImageSize} onBoundsUpdate={setMediaBounds} />}
 
         <OrbitControls enableDamping enableZoom={true} />
 
         {/* ASCII Effect with PostFX */}
         <EffectComposer>
-          <AsciiEffect
+          <AsciiEffectWithMask
+            densityMask={densityMask}
+            maskImageUrl={maskImageUrl}
+            maskScale={maskScale / 2.0}
+            onMaskLoad={setMaskDimensions}
             style={style}
             cellSize={cellSize}
             invert={invert}
@@ -531,8 +1021,22 @@ export function EffectScene() {
               waveSpeed: 1,
               glitchIntensity: 0,
               glitchFrequency: 0,
-              brightnessAdjust: 0,
-              contrastAdjust: 1,
+              brightnessAdjust: brightness,
+              contrastAdjust: contrast,
+              saturationAdjust: saturation,
+              backgroundColor: [
+                parseInt(backgroundColor.slice(1, 3), 16) / 255,
+                parseInt(backgroundColor.slice(3, 5), 16) / 255,
+                parseInt(backgroundColor.slice(5, 7), 16) / 255
+              ],
+              cellDensity: cellDensity,
+              randomSeed: randomSeed,
+              densityMask: densityMask === "none" ? 0 : densityMask === "uniform" ? 1 : densityMask === "gradient-linear" ? (gradientDirection === "up" ? 2 : gradientDirection === "down" ? 3 : gradientDirection === "left" ? 4 : 5) : densityMask === "gradient-radial" ? 6 : (densityMask === "logo-mask" || densityMask === "image-mask") ? 7 : 0,
+              gradientMidpoint: gradientMidpoint,
+              densityStart: densityStart,
+              densityEnd: densityEnd,
+              maskOffsetX: maskOffsetX,
+              maskOffsetY: maskOffsetY,
             }}
           />
         </EffectComposer>
@@ -572,6 +1076,31 @@ export function EffectScene() {
             <strong>Canvas/Viewport:</strong><br/>
             {Math.round(resolution.x)} × {Math.round(resolution.y)} px
           </div>
+          {mediaBounds && (
+            <div style={{ marginTop: "8px", color: "#ffdd88" }}>
+              <strong>Media Position:</strong><br/>
+              X: {Math.round(mediaBounds.x)} px<br/>
+              Y: {Math.round(mediaBounds.y)} px<br/>
+              Width: {Math.round(mediaBounds.width)} px<br/>
+              Height: {Math.round(mediaBounds.height)} px
+            </div>
+          )}
+          {(densityMask === "logo-mask" || densityMask === "image-mask") && maskDimensions && (
+            <div style={{ marginTop: "8px", color: "#aaffaa" }}>
+              <strong>Mask Dimensions:</strong><br/>
+              Width: {maskDimensions.width} px<br/>
+              Height: {maskDimensions.height} px<br/>
+              Aspect: {(maskDimensions.width / maskDimensions.height).toFixed(4)}<br/>
+              {maskRenderedSize && (
+                <>
+                  <br/>
+                  <strong>Rendered Size:</strong><br/>
+                  Width: {Math.round(maskRenderedSize.width)} px<br/>
+                  Height: {Math.round(maskRenderedSize.height)} px
+                </>
+              )}
+            </div>
+          )}
           <div style={{ marginTop: "8px", fontSize: "10px", opacity: 0.7, borderTop: "1px solid #555", paddingTop: "4px" }}>
             Aspect Ratio: {(resolution.x / resolution.y).toFixed(2)}
             {originalImageSize && showImage && (
