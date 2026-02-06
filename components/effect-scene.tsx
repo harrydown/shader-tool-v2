@@ -285,6 +285,9 @@ export function EffectScene() {
     
     // Wait for next frame to ensure canvas is rendered
     requestAnimationFrame(() => {
+      // Account for device pixel ratio
+      const dpr = window.devicePixelRatio || 1
+      
       // Create temporary canvas at media dimensions
       const tempCanvas = document.createElement('canvas')
       tempCanvas.width = Math.round(mediaBounds.width)
@@ -303,13 +306,13 @@ export function EffectScene() {
       ctx.imageSmoothingEnabled = true
       ctx.imageSmoothingQuality = 'high'
       
-      // Draw only the media bounds area
+      // Draw only the media bounds area (accounting for device pixel ratio)
       ctx.drawImage(
         sourceCanvas,
-        Math.round(mediaBounds.x), // source x
-        Math.round(mediaBounds.y), // source y
-        Math.round(mediaBounds.width), // source width
-        Math.round(mediaBounds.height), // source height
+        Math.round(mediaBounds.x * dpr), // source x
+        Math.round(mediaBounds.y * dpr), // source y
+        Math.round(mediaBounds.width * dpr), // source width
+        Math.round(mediaBounds.height * dpr), // source height
         0, // destination x
         0, // destination y
         Math.round(mediaBounds.width), // destination width
