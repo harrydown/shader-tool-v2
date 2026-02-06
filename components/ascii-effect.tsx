@@ -7,6 +7,7 @@ import { Uniform, Vector2 } from "three"
 const fragmentShader = `
 // Basic uniforms
 uniform float cellSize;
+uniform float cellSpacing;
 uniform bool invert;
 uniform bool colorMode;
 uniform int asciiStyle;
@@ -54,6 +55,7 @@ uniform bool hasDensityMaskTexture;
 uniform float maskScale;
 uniform float maskOffsetX;
 uniform float maskOffsetY;
+uniform bool makeBlackAlpha;
 
 // Helper functions
 float random(vec2 st) {
@@ -449,6 +451,34 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   if (invert) brightness = 1.0 - brightness;
 
   vec2 localUV = fract(uv * cellCount);
+  
+  // Apply cell spacing
+  // Positive spacing creates gaps between cells, negative makes patterns larger
+  float spacingAmount = cellSpacing;
+  
+  // For positive spacing: shrink the active area of each cell to create gaps
+  if (spacingAmount > 0.0) {
+    // Check if we're in the gap region (border of the cell)
+    float borderSize = spacingAmount * 0.5; // Half on each side
+    if (localUV.x < borderSize || localUV.x > (1.0 - borderSize) || 
+        localUV.y < borderSize || localUV.y > (1.0 - borderSize)) {
+      outputColor = vec4(backgroundColor, 1.0);
+      return;
+    }
+    // Remap the interior UV to 0-1
+    localUV = (localUV - borderSize) / (1.0 - 2.0 * borderSize);
+  }
+  // For negative spacing: scale pattern from center to make it appear larger
+  else if (spacingAmount < 0.0) {
+    // Scale down the UV coordinates to make pattern appear larger
+    // This zooms into the pattern center
+    float scale = 1.0 + (spacingAmount * -2.0); // 1.0 to 2.0 range for -0.5 to 0
+    localUV = (localUV - 0.5) / scale + 0.5;
+    
+    // Keep UV in valid range to prevent pattern breaking
+    localUV = clamp(localUV, 0.0, 1.0);
+  }
+  
   float charValue = getChar(brightness, localUV, asciiStyle);
 
   // Cell density - randomly hide cells based on density value
@@ -546,14 +576,24 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
     finalColor *= mix(1.0, vignette, vignetteIntensity);
   }
 
-  outputColor = vec4(finalColor, cellColor.a);
+  // Make black pixels transparent to show background image (if enabled)
+  float luminance = dot(finalColor, vec3(0.299, 0.587, 0.114));
+  float alpha = cellColor.a;
+  
+  // If makeBlackAlpha is enabled and pixel is very dark, make it transparent
+  if (makeBlackAlpha && luminance < 0.01) {
+    alpha = 0.0;
+  }
+
+  outputColor = vec4(finalColor, alpha);
 }
 `
 
 // Module-level variables for state management
 let _time = 0
 let _deltaAccumulator = 0
-let _cellSize = 16
+let _cellSize = 8
+let _cellSpacing = 0.0
 let _invert = false
 let _colorMode = true
 let _asciiStyle = 0
@@ -577,6 +617,7 @@ let _hasMaskTexture = false
 let _maskScale = 1.0
 let _maskOffsetX = 0.0
 let _maskOffsetY = 0.0
+let _makeBlackAlpha = true
 
 class AsciiEffectImpl extends Effect {
   constructor(options) {
@@ -597,6 +638,7 @@ class AsciiEffectImpl extends Effect {
       blendFunction: BlendFunction.NORMAL,
       uniforms: new Map([
         ["cellSize", new Uniform(cellSize)],
+        ["cellSpacing", new Uniform(postfx.cellSpacing || 0.0)],
         ["invert", new Uniform(invert)],
         ["colorMode", new Uniform(color)],
         ["asciiStyle", new Uniform(style)],
@@ -642,10 +684,12 @@ class AsciiEffectImpl extends Effect {
         ["maskScale", new Uniform(postfx.maskScale || 1.0)],
         ["maskOffsetX", new Uniform(postfx.maskOffsetX || 0.0)],
         ["maskOffsetY", new Uniform(postfx.maskOffsetY || 0.0)],
+        ["makeBlackAlpha", new Uniform(postfx.makeBlackAlpha ?? true)],
       ]),
     })
 
     _cellSize = cellSize
+    _cellSpacing = postfx.cellSpacing || 0.0
     _invert = invert
     _colorMode = color
     _asciiStyle = style
@@ -669,6 +713,7 @@ class AsciiEffectImpl extends Effect {
     _maskScale = postfx.maskScale || 1.0
     _maskOffsetX = postfx.maskOffsetX || 0.0
     _maskOffsetY = postfx.maskOffsetY || 0.0
+    _makeBlackAlpha = postfx.makeBlackAlpha ?? true
   }
 
   update(renderer, inputBuffer, deltaTime) {
@@ -687,6 +732,7 @@ class AsciiEffectImpl extends Effect {
 
     this.uniforms.get("time").value = _time
     this.uniforms.get("cellSize").value = _cellSize
+    this.uniforms.get("cellSpacing").value = _cellSpacing
     this.uniforms.get("invert").value = _invert
     this.uniforms.get("colorMode").value = _colorMode
     this.uniforms.get("asciiStyle").value = _asciiStyle
@@ -710,6 +756,7 @@ class AsciiEffectImpl extends Effect {
     this.uniforms.get("maskScale").value = _maskScale
     this.uniforms.get("maskOffsetX").value = _maskOffsetX
     this.uniforms.get("maskOffsetY").value = _maskOffsetY
+    this.uniforms.get("makeBlackAlpha").value = _makeBlackAlpha
   }
 }
 
@@ -731,6 +778,7 @@ export const AsciiEffect = forwardRef((props, ref) => {
   const styleNum = styleMap[style] || 0
 
   _cellSize = cellSize
+  _cellSpacing = postfx?.cellSpacing ?? 0.0
   _invert = invert
   _colorMode = color
   _asciiStyle = styleNum
@@ -754,7 +802,7 @@ export const AsciiEffect = forwardRef((props, ref) => {
   _maskScale = postfx.maskScale || 1.0
   _maskOffsetX = postfx.maskOffsetX || 0.0
   _maskOffsetY = postfx.maskOffsetY || 0.0
-
+  _makeBlackAlpha = postfx?.makeBlackAlpha ?? true
   console.log('AsciiEffect props:', { 
     brightness: postfx.brightnessAdjust, 
     contrast: postfx.contrastAdjust, 

@@ -125,6 +125,7 @@ export function EffectScene() {
   const [resolution, setResolution] = useState(new Vector2(1920, 1080))
   const [style, setStyle] = useState<"standard" | "dense" | "minimal" | "blocks" | "standard-dots" | "melding-dots" | "ascii-characters-minimal" | "ascii-characters-normal">("standard")
   const [cellSize, setCellSize] = useState(16)
+  const [cellSpacing, setCellSpacing] = useState(0.0)
   const [colorMode, setColorMode] = useState(true)
   const [invert, setInvert] = useState(false)
   const [blur, setBlur] = useState(1.0)
@@ -149,6 +150,10 @@ export function EffectScene() {
   const [maskRenderedSize, setMaskRenderedSize] = useState<{ width: number; height: number } | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [showImage, setShowImage] = useState(false)
+  const [showBackgroundImage, setShowBackgroundImage] = useState(false)
+  const [showCanvasBackground, setShowCanvasBackground] = useState(true)
+  const [makeBlackAlpha, setMakeBlackAlpha] = useState(false)
+  const [includeBackgroundInExport, setIncludeBackgroundInExport] = useState(true)
   const [isRecording, setIsRecording] = useState(false)
   const [originalImageSize, setOriginalImageSize] = useState<{ width: number; height: number } | null>(null)
   const [mediaBounds, setMediaBounds] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
@@ -237,9 +242,21 @@ export function EffectScene() {
   const captureScreenshot = () => {
     const canvas = containerRef.current?.querySelector('canvas')
     if (canvas) {
+      // Temporarily hide background if not included in export
+      const bgElement = containerRef.current?.querySelector('[data-background-layer]') as HTMLElement
+      const originalDisplay = bgElement?.style.display
+      if (bgElement && !includeBackgroundInExport) {
+        bgElement.style.display = 'none'
+      }
+      
       // Regular canvas capture at viewport size
       requestAnimationFrame(() => {
         canvas.toBlob((blob) => {
+          // Restore background visibility
+          if (bgElement && originalDisplay !== undefined) {
+            bgElement.style.display = originalDisplay
+          }
+          
           if (blob) {
             const url = URL.createObjectURL(blob)
             const a = document.createElement('a')
@@ -259,6 +276,13 @@ export function EffectScene() {
     const sourceCanvas = containerRef.current?.querySelector('canvas') as HTMLCanvasElement
     if (!sourceCanvas) return
     
+    // Temporarily hide background if not included in export
+    const bgElement = containerRef.current?.querySelector('[data-background-layer]') as HTMLElement
+    const originalDisplay = bgElement?.style.display
+    if (bgElement && !includeBackgroundInExport) {
+      bgElement.style.display = 'none'
+    }
+    
     // Wait for next frame to ensure canvas is rendered
     requestAnimationFrame(() => {
       // Create temporary canvas at media dimensions
@@ -267,7 +291,13 @@ export function EffectScene() {
       tempCanvas.height = Math.round(mediaBounds.height)
       const ctx = tempCanvas.getContext('2d')
       
-      if (!ctx) return
+      if (!ctx) {
+        // Restore background visibility
+        if (bgElement && originalDisplay !== undefined) {
+          bgElement.style.display = originalDisplay
+        }
+        return
+      }
       
       // Extract just the media portion from the source canvas
       ctx.imageSmoothingEnabled = true
@@ -288,6 +318,11 @@ export function EffectScene() {
       
       // Download the image
       tempCanvas.toBlob((blob) => {
+        // Restore background visibility
+        if (bgElement && originalDisplay !== undefined) {
+          bgElement.style.display = originalDisplay
+        }
+        
         if (blob) {
           const url = URL.createObjectURL(blob)
           const a = document.createElement('a')
@@ -365,6 +400,26 @@ export function EffectScene() {
 
   return (
     <div ref={containerRef} style={{ width: "100%", height: "100vh", position: "relative" }}>
+      {/* Background Image Layer (unprocessed) */}
+      {showImage && imageUrl && mediaBounds && showBackgroundImage && (
+        <div
+          data-background-layer
+          style={{
+            position: "absolute",
+            left: `${mediaBounds.x}px`,
+            top: `${mediaBounds.y}px`,
+            width: `${mediaBounds.width}px`,
+            height: `${mediaBounds.height}px`,
+            backgroundImage: `url(${imageUrl})`,
+            backgroundSize: "contain",
+            backgroundPosition: "center",
+            backgroundRepeat: "no-repeat",
+            zIndex: 0,
+            pointerEvents: "none"
+          }}
+        />
+      )}
+      
       {/* Control Panel */}
       <div style={{
         position: "absolute",
@@ -375,12 +430,12 @@ export function EffectScene() {
         borderRadius: "8px",
         color: "white",
         fontFamily: "monospace",
-        fontSize: "14px",
+        fontSize: "11px",
         zIndex: 1000,
         width: "360px"
       }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
-          <h3 style={{ margin: "0", fontSize: "16px" }}>Shader Controls</h3>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+          <h3 style={{ margin: "0", fontSize: "13px" }}>Shader Controls</h3>
           <button
             onClick={resetSettings}
             style={{
@@ -397,8 +452,8 @@ export function EffectScene() {
           </button>
         </div>
         
-        <div style={{ marginBottom: "15px" }}>
-          <label style={{ display: "block", marginBottom: "5px" }}>Style</label>
+        <div style={{ marginBottom: "10px" }}>
+          <label style={{ display: "block", marginBottom: "3px", fontSize: "11px", fontSize: "11px" }}>Style</label>
           <select 
             value={style} 
             onChange={(e) => setStyle(e.target.value as any)}
@@ -415,15 +470,15 @@ export function EffectScene() {
             <option value="dense">Dense</option>
             <option value="minimal">Minimal</option>
             <option value="blocks">Blocks</option>
-            <option value="standard-dots">Standard - Dots</option>
+            <option value="standard-dots">Dots</option>
             <option value="melding-dots">Melding Dots</option>
             <option value="ascii-characters-minimal">ASCII Characters minimal</option>
             <option value="ascii-characters-normal">ASCII Characters normal</option>
           </select>
         </div>
 
-        <div style={{ marginBottom: "15px" }}>
-          <label style={{ display: "block", marginBottom: "5px" }}>
+        <div style={{ marginBottom: "10px" }}>
+          <label style={{ display: "block", marginBottom: "3px", fontSize: "11px", fontSize: "11px" }}>
             Cell Size: {cellSize}px
           </label>
           <input 
@@ -432,61 +487,82 @@ export function EffectScene() {
             max="32" 
             value={cellSize}
             onChange={(e) => setCellSize(Number(e.target.value))}
-            style={{ width: "100%" }}
+            style={{ width: "100%", height: "4px" }}
           />
         </div>
 
-        <div style={{ marginBottom: "15px" }}>
-          <label style={{ display: "block", marginBottom: "5px" }}>
-            Blur: {blur.toFixed(1)}
+        <div style={{ marginBottom: "10px" }}>
+          <label style={{ display: "block", marginBottom: "3px", fontSize: "11px", fontSize: "11px" }}>
+            Cell Spacing: {cellSpacing.toFixed(2)}
           </label>
           <input 
             type="range" 
-            min="0.5" 
-            max="3" 
-            step="0.1"
-            value={blur}
-            onChange={(e) => setBlur(Number(e.target.value))}
-            style={{ width: "100%" }}
+            min="-0.5" 
+            max="0.5" 
+            step="0.01"
+            value={cellSpacing}
+            onChange={(e) => setCellSpacing(Number(e.target.value))}
+            style={{ width: "100%", height: "4px" }}
           />
         </div>
 
-        <div style={{ marginBottom: "15px" }}>
-          <label style={{ display: "block", marginBottom: "5px" }}>
-            Min Size: {minSize.toFixed(1)}
-          </label>
-          <input 
-            type="range" 
-            min="0.1" 
-            max="1.0" 
-            step="0.1"
-            value={minSize}
-            onChange={(e) => setMinSize(Number(e.target.value))}
-            style={{ width: "100%" }}
-          />
-        </div>
+        {style === "melding-dots" && (
+          <div style={{ marginBottom: "10px" }}>
+            <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
+              Blur: {blur.toFixed(1)}
+            </label>
+            <input 
+              type="range" 
+              min="0.5" 
+              max="3" 
+              step="0.1"
+              value={blur}
+              onChange={(e) => setBlur(Number(e.target.value))}
+              style={{ width: "100%", height: "4px" }}
+            />
+          </div>
+        )}
 
-        <div style={{ marginBottom: "15px" }}>
-          <label style={{ display: "block", marginBottom: "5px" }}>
-            Max Size: {maxSize.toFixed(1)}
-          </label>
-          <input 
-            type="range" 
-            min="1.0" 
-            max="3.0" 
-            step="0.1"
-            value={maxSize}
-            onChange={(e) => setMaxSize(Number(e.target.value))}
-            style={{ width: "100%" }}
-          />
-        </div>
+        {(style === "standard-dots" || style === "melding-dots") && (
+          <div style={{ marginBottom: "10px" }}>
+            <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
+              Min Size: {minSize.toFixed(1)}
+            </label>
+            <input 
+              type="range" 
+              min="0.1" 
+              max="1.0" 
+              step="0.1"
+              value={minSize}
+              onChange={(e) => setMinSize(Number(e.target.value))}
+              style={{ width: "100%", height: "4px" }}
+            />
+          </div>
+        )}
+
+        {(style === "standard-dots" || style === "melding-dots") && (
+          <div style={{ marginBottom: "10px" }}>
+            <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
+              Max Size: {maxSize.toFixed(1)}
+            </label>
+            <input 
+              type="range" 
+              min="1.0" 
+              max="3.0" 
+              step="0.1"
+              value={maxSize}
+              onChange={(e) => setMaxSize(Number(e.target.value))}
+              style={{ width: "100%", height: "4px" }}
+            />
+          </div>
+        )}
 
         <div style={{ marginBottom: "20px", paddingBottom: "15px", borderBottom: "1px solid #555" }}>
           <label style={{ display: "block", marginBottom: "10px", fontWeight: "bold", color: "#aaf" }}>
             Cell Density
           </label>
-          <div style={{ marginBottom: "15px" }}>
-            <label style={{ display: "block", marginBottom: "5px" }}>
+          <div style={{ marginBottom: "10px" }}>
+            <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
               Density Mask
             </label>
             <select 
@@ -511,8 +587,8 @@ export function EffectScene() {
             </select>
           </div>
           {densityMask === "gradient-linear" && (
-            <div style={{ marginBottom: "15px" }}>
-              <label style={{ display: "block", marginBottom: "5px" }}>
+            <div style={{ marginBottom: "10px" }}>
+              <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
                 Direction
               </label>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "5px" }}>
@@ -577,8 +653,8 @@ export function EffectScene() {
           )}
           {densityMask === "image-mask" && (
             <>
-              <div style={{ marginBottom: "15px" }}>
-                <label style={{ display: "block", marginBottom: "5px" }}>
+              <div style={{ marginBottom: "10px" }}>
+                <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
                   Mask Image
                 </label>
                 <input 
@@ -607,8 +683,8 @@ export function EffectScene() {
           )}
           {(densityMask === "logo-mask" || densityMask === "image-mask") && (
             <>
-              <div style={{ marginBottom: "15px" }}>
-                <label style={{ display: "block", marginBottom: "5px" }}>
+              <div style={{ marginBottom: "10px" }}>
+                <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
                   Mask Scale: {maskScale.toFixed(2)}x
                 </label>
                 <input 
@@ -618,11 +694,11 @@ export function EffectScene() {
                   step="0.1"
                   value={maskScale}
                   onChange={(e) => setMaskScale(Number(e.target.value))}
-                  style={{ width: "100%" }}
+                  style={{ width: "100%", height: "4px" }}
                 />
               </div>
-              <div style={{ marginBottom: "15px" }}>
-                <label style={{ display: "block", marginBottom: "5px" }}>
+              <div style={{ marginBottom: "10px" }}>
+                <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
                   Position X: {maskOffsetX.toFixed(2)}
                 </label>
                 <input 
@@ -632,11 +708,11 @@ export function EffectScene() {
                   step="0.01"
                   value={maskOffsetX}
                   onChange={(e) => setMaskOffsetX(Number(e.target.value))}
-                  style={{ width: "100%" }}
+                  style={{ width: "100%", height: "4px" }}
                 />
               </div>
-              <div style={{ marginBottom: "15px" }}>
-                <label style={{ display: "block", marginBottom: "5px" }}>
+              <div style={{ marginBottom: "10px" }}>
+                <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
                   Position Y: {maskOffsetY.toFixed(2)}
                 </label>
                 <input 
@@ -646,11 +722,11 @@ export function EffectScene() {
                   step="0.01"
                   value={maskOffsetY}
                   onChange={(e) => setMaskOffsetY(Number(e.target.value))}
-                  style={{ width: "100%" }}
+                  style={{ width: "100%", height: "4px" }}
                 />
               </div>
-              <div style={{ marginBottom: "15px" }}>
-                <label style={{ display: "block", marginBottom: "5px" }}>
+              <div style={{ marginBottom: "10px" }}>
+                <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
                   Density Start: {densityStart}%
                 </label>
                 <input 
@@ -659,11 +735,11 @@ export function EffectScene() {
                   max="100" 
                   value={densityStart}
                   onChange={(e) => setDensityStart(Number(e.target.value))}
-                  style={{ width: "100%" }}
+                  style={{ width: "100%", height: "4px" }}
                 />
               </div>
-              <div style={{ marginBottom: "15px" }}>
-                <label style={{ display: "block", marginBottom: "5px" }}>
+              <div style={{ marginBottom: "10px" }}>
+                <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
                   Density End: {densityEnd}%
                 </label>
                 <input 
@@ -672,15 +748,15 @@ export function EffectScene() {
                   max="100" 
                   value={densityEnd}
                   onChange={(e) => setDensityEnd(Number(e.target.value))}
-                  style={{ width: "100%" }}
+                  style={{ width: "100%", height: "4px" }}
                 />
               </div>
             </>
           )}
           {densityMask === "gradient-linear" && (
             <>
-              <div style={{ marginBottom: "15px" }}>
-                <label style={{ display: "block", marginBottom: "5px" }}>
+              <div style={{ marginBottom: "10px" }}>
+                <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
                   Density Start: {densityStart}%
                 </label>
                 <input 
@@ -689,11 +765,11 @@ export function EffectScene() {
                   max="100" 
                   value={densityStart}
                   onChange={(e) => setDensityStart(Number(e.target.value))}
-                  style={{ width: "100%" }}
+                  style={{ width: "100%", height: "4px" }}
                 />
               </div>
-              <div style={{ marginBottom: "15px" }}>
-                <label style={{ display: "block", marginBottom: "5px" }}>
+              <div style={{ marginBottom: "10px" }}>
+                <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
                   Density End: {densityEnd}%
                 </label>
                 <input 
@@ -702,11 +778,11 @@ export function EffectScene() {
                   max="100" 
                   value={densityEnd}
                   onChange={(e) => setDensityEnd(Number(e.target.value))}
-                  style={{ width: "100%" }}
+                  style={{ width: "100%", height: "4px" }}
                 />
               </div>
-              <div style={{ marginBottom: "15px" }}>
-                <label style={{ display: "block", marginBottom: "5px" }}>
+              <div style={{ marginBottom: "10px" }}>
+                <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
                   Gradient Midpoint: {(gradientMidpoint * 100).toFixed(0)}%
                 </label>
                 <input 
@@ -716,14 +792,14 @@ export function EffectScene() {
                   step="0.01"
                   value={gradientMidpoint}
                   onChange={(e) => setGradientMidpoint(Number(e.target.value))}
-                  style={{ width: "100%" }}
+                  style={{ width: "100%", height: "4px" }}
                 />
               </div>
             </>
           )}
           {densityMask === "uniform" && (
-            <div style={{ marginBottom: "15px" }}>
-              <label style={{ display: "block", marginBottom: "5px" }}>
+            <div style={{ marginBottom: "10px" }}>
+              <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
                 Density: {cellDensity}%
               </label>
               <input 
@@ -732,7 +808,7 @@ export function EffectScene() {
                 max="100" 
                 value={cellDensity}
                 onChange={(e) => setCellDensity(Number(e.target.value))}
-                style={{ width: "100%" }}
+                style={{ width: "100%", height: "4px" }}
               />
             </div>
           )}
@@ -755,8 +831,8 @@ export function EffectScene() {
           )}
         </div>
 
-        <div style={{ marginBottom: "15px" }}>
-          <label style={{ display: "block", marginBottom: "5px" }}>
+        <div style={{ marginBottom: "10px" }}>
+          <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
             Background Color
           </label>
           <input 
@@ -772,8 +848,8 @@ export function EffectScene() {
             }}
           />
         </div>
-        <div style={{ marginBottom: "15px" }}>
-          <label style={{ display: "block", marginBottom: "5px" }}>
+        <div style={{ marginBottom: "10px" }}>
+          <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
             Brightness: {brightness.toFixed(2)}
           </label>
           <input 
@@ -783,12 +859,12 @@ export function EffectScene() {
             step="0.01"
             value={brightness}
             onChange={(e) => setBrightness(Number(e.target.value))}
-            style={{ width: "100%" }}
+            style={{ width: "100%", height: "4px" }}
           />
         </div>
 
-        <div style={{ marginBottom: "15px" }}>
-          <label style={{ display: "block", marginBottom: "5px" }}>
+        <div style={{ marginBottom: "10px" }}>
+          <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
             Contrast: {contrast.toFixed(2)}
           </label>
           <input 
@@ -798,12 +874,12 @@ export function EffectScene() {
             step="0.01"
             value={contrast}
             onChange={(e) => setContrast(Number(e.target.value))}
-            style={{ width: "100%" }}
+            style={{ width: "100%", height: "4px" }}
           />
         </div>
 
-        <div style={{ marginBottom: "15px" }}>
-          <label style={{ display: "block", marginBottom: "5px" }}>
+        <div style={{ marginBottom: "10px" }}>
+          <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
             Saturation: {saturation.toFixed(2)}
           </label>
           <input 
@@ -813,8 +889,32 @@ export function EffectScene() {
             step="0.01"
             value={saturation}
             onChange={(e) => setSaturation(Number(e.target.value))}
-            style={{ width: "100%" }}
+            style={{ width: "100%", height: "4px" }}
           />
+        </div>
+
+        <div style={{ marginBottom: "10px" }}>
+          <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
+            <input 
+              type="checkbox" 
+              checked={showCanvasBackground}
+              onChange={(e) => setShowCanvasBackground(e.target.checked)}
+              style={{ marginRight: "8px" }}
+            />
+            Show Background
+          </label>
+        </div>
+
+        <div style={{ marginBottom: "10px" }}>
+          <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
+            <input 
+              type="checkbox" 
+              checked={makeBlackAlpha}
+              onChange={(e) => setMakeBlackAlpha(e.target.checked)}
+              style={{ marginRight: "8px" }}
+            />
+            Make Black Alpha
+          </label>
         </div>
 
         <div style={{ marginBottom: "10px" }}>
@@ -829,7 +929,7 @@ export function EffectScene() {
           </label>
         </div>
 
-        <div style={{ marginBottom: "15px" }}>
+        <div style={{ marginBottom: "10px" }}>
           <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
             <input 
               type="checkbox" 
@@ -943,7 +1043,25 @@ export function EffectScene() {
                   onChange={(e) => setShowImage(e.target.checked)}
                   style={{ marginRight: "8px" }}
                 />
-                Show Image
+                Show Foreground Image
+              </label>
+              <label style={{ display: "flex", alignItems: "center", cursor: "pointer", marginBottom: "10px" }}>
+                <input 
+                  type="checkbox" 
+                  checked={showBackgroundImage}
+                  onChange={(e) => setShowBackgroundImage(e.target.checked)}
+                  style={{ marginRight: "8px" }}
+                />
+                Show Background Image
+              </label>
+              <label style={{ display: "flex", alignItems: "center", cursor: "pointer", marginBottom: "10px" }}>
+                <input 
+                  type="checkbox" 
+                  checked={includeBackgroundInExport}
+                  onChange={(e) => setIncludeBackgroundInExport(e.target.checked)}
+                  style={{ marginRight: "8px" }}
+                />
+                Include in Export
               </label>
               <button
                 onClick={clearImage}
@@ -967,10 +1085,10 @@ export function EffectScene() {
 
       <Canvas
         camera={{ position: [0, 0, 5], fov: 50 }}
-        style={{ background: backgroundColor }}
-        gl={{ preserveDrawingBuffer: true }}
+        style={{ background: (showImage && !showCanvasBackground) ? "transparent" : backgroundColor }}
+        gl={{ preserveDrawingBuffer: true, alpha: true }}
       >
-        <color attach="background" args={[backgroundColor]} />
+        <color attach="background" args={(showImage && !showCanvasBackground) ? ["transparent"] : [backgroundColor]} />
 
         {/* Lighting */}
         <hemisphereLight intensity={0.5} />
@@ -1000,6 +1118,7 @@ export function EffectScene() {
             resolution={resolution}
             mousePos={mousePos}
             postfx={{
+              cellSpacing: cellSpacing,
               scanlineIntensity: 0,
               scanlineCount: 200,
               targetFPS: 0,
@@ -1037,6 +1156,7 @@ export function EffectScene() {
               densityEnd: densityEnd,
               maskOffsetX: maskOffsetX,
               maskOffsetY: maskOffsetY,
+              makeBlackAlpha: makeBlackAlpha,
             }}
           />
         </EffectComposer>
