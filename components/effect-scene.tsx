@@ -7,6 +7,8 @@ import { OrbitControls } from "@react-three/drei"
 import { Vector2, TextureLoader, Box3, Vector3 } from "three"
 import * as THREE from "three"
 import { AsciiEffect } from "./ascii-effect"
+import { ASCIIRendererInner } from "./ascii-renderer-inner"
+import { ASCIICanvas } from "./ascii-canvas"
 
 function RotatingMesh({ onBoundsUpdate }: { onBoundsUpdate?: (bounds: { x: number; y: number; width: number; height: number }) => void }) {
   const meshRef = useRef<THREE.Mesh>(null)
@@ -121,6 +123,7 @@ function AsciiEffectWithMask({ maskImageUrl, maskScale, densityMask, onMaskLoad,
 
 export function EffectScene() {
   const containerRef = useRef<HTMLDivElement>(null)
+  const [shaderType, setShaderType] = useState<"cell" | "true-ascii">("cell")
   const [mousePos, setMousePos] = useState(new Vector2(0, 0))
   const [resolution, setResolution] = useState(new Vector2(1920, 1080))
   const [style, setStyle] = useState<"standard" | "dense" | "minimal" | "blocks" | "standard-dots" | "melding-dots" | "ascii-characters-minimal" | "ascii-characters-normal">("standard")
@@ -132,6 +135,7 @@ export function EffectScene() {
   const [minSize, setMinSize] = useState(0.2)
   const [maxSize, setMaxSize] = useState(1.8)
   const [backgroundColor, setBackgroundColor] = useState("#5c5c5c")
+  const [characterSet, setCharacterSet] = useState(0)
   const [brightness, setBrightness] = useState(0)
   const [contrast, setContrast] = useState(1)
   const [saturation, setSaturation] = useState(1)
@@ -147,6 +151,7 @@ export function EffectScene() {
   const [maskOffsetX, setMaskOffsetX] = useState(0.0)
   const [maskOffsetY, setMaskOffsetY] = useState(0.0)
   const [maskDimensions, setMaskDimensions] = useState<{ width: number; height: number } | null>(null)
+  const [asciiMaskImageData, setAsciiMaskImageData] = useState<ImageData | null>(null)
   const [maskRenderedSize, setMaskRenderedSize] = useState<{ width: number; height: number } | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [showImage, setShowImage] = useState(false)
@@ -157,9 +162,26 @@ export function EffectScene() {
   const [isRecording, setIsRecording] = useState(false)
   const [originalImageSize, setOriginalImageSize] = useState<{ width: number; height: number } | null>(null)
   const [mediaBounds, setMediaBounds] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
+  const [asciiImageData, setAsciiImageData] = useState<ImageData | null>(null)
+  const [asciiCanvasSize, setAsciiCanvasSize] = useState({ width: 0, height: 0 })
+  const [asciiLogicalSize, setAsciiLogicalSize] = useState({ width: 0, height: 0 })
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const recordedChunksRef = useRef<Blob[]>([])
+
+  // Handler for ASCII renderer
+  const handleAsciiRenderData = (data: ImageData, width: number, height: number) => {
+    setAsciiImageData(data)
+    setAsciiCanvasSize({ width, height })
+    // Calculate logical size (accounting for device pixel ratio)
+    const pixelRatio = window.devicePixelRatio || 1
+    const logicalW = Math.floor(width / pixelRatio)
+    const logicalH = Math.floor(height / pixelRatio)
+    setAsciiLogicalSize({ 
+      width: logicalW, 
+      height: logicalH
+    })
+  }
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -215,6 +237,43 @@ export function EffectScene() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [densityMask, maskDimensions?.width ?? 0, maskDimensions?.height ?? 0, maskScale, resolution.x, resolution.y]);
+
+  // Load mask image for ASCII shader
+  useEffect(() => {
+    if (shaderType !== "true-ascii") return
+    if (densityMask !== "logo-mask" && densityMask !== "image-mask") {
+      setAsciiMaskImageData(null)
+      return
+    }
+
+    const imageUrl = densityMask === "logo-mask" ? "/Syndica-Logo-White.svg" : maskImageUrl
+    if (!imageUrl) {
+      setAsciiMaskImageData(null)
+      return
+    }
+
+    const img = new Image()
+    img.crossOrigin = "anonymous"
+    img.onload = () => {
+      setMaskDimensions({ width: img.width, height: img.height })
+      
+      // Draw to canvas and extract ImageData
+      const canvas = document.createElement('canvas')
+      canvas.width = img.width
+      canvas.height = img.height
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })
+      if (ctx) {
+        ctx.drawImage(img, 0, 0)
+        const imageData = ctx.getImageData(0, 0, img.width, img.height)
+        setAsciiMaskImageData(imageData)
+      }
+    }
+    img.onerror = () => {
+      setAsciiMaskImageData(null)
+      setMaskDimensions(null)
+    }
+    img.src = imageUrl
+  }, [shaderType, densityMask, maskImageUrl])
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -402,10 +461,11 @@ export function EffectScene() {
   }
 
   return (
-    <div ref={containerRef} style={{ width: "100%", height: "100vh", position: "relative" }}>
+    <div id="main-container" ref={containerRef} style={{ width: "100%", height: "100vh", position: "relative" }}>
       {/* Background Image Layer (unprocessed) */}
       {showImage && imageUrl && mediaBounds && showBackgroundImage && (
         <div
+          id="background-image-layer"
           data-background-layer
           style={{
             position: "absolute",
@@ -424,7 +484,7 @@ export function EffectScene() {
       )}
       
       {/* Control Panel */}
-      <div style={{
+      <div id="control-panel" style={{
         position: "absolute",
         top: "20px",
         right: "20px",
@@ -437,8 +497,31 @@ export function EffectScene() {
         zIndex: 1000,
         width: "360px"
       }}>
+        <div style={{ marginBottom: "15px", paddingBottom: "15px", borderBottom: "1px solid #555" }}>
+          <label style={{ display: "block", marginBottom: "5px", fontSize: "11px" }}>Shader Type</label>
+          <select 
+            value={shaderType} 
+            onChange={(e) => setShaderType(e.target.value as "cell" | "true-ascii")}
+            style={{
+              width: "100%",
+              padding: "8px",
+              background: "#333",
+              color: "white",
+              border: "1px solid #555",
+              borderRadius: "4px",
+              fontSize: "13px",
+              fontWeight: "bold"
+            }}
+          >
+            <option value="cell">Cell Shader</option>
+            <option value="true-ascii">ASCII Shader</option>
+          </select>
+        </div>
+        
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-          <h3 style={{ margin: "0", fontSize: "13px" }}>Shader Controls</h3>
+          <h3 style={{ margin: "0", fontSize: "13px" }}>
+            {shaderType === "cell" ? "Cell Shader Controls" : "ASCII Shader Controls"}
+          </h3>
           <button
             onClick={resetSettings}
             style={{
@@ -455,30 +538,68 @@ export function EffectScene() {
           </button>
         </div>
         
-        <div style={{ marginBottom: "10px" }}>
-          <label style={{ display: "block", marginBottom: "3px", fontSize: "11px", fontSize: "11px" }}>Style</label>
-          <select 
-            value={style} 
-            onChange={(e) => setStyle(e.target.value as any)}
-            style={{
-              width: "100%",
-              padding: "5px",
-              background: "#333",
-              color: "white",
-              border: "1px solid #555",
-              borderRadius: "4px"
-            }}
-          >
-            <option value="standard">Standard</option>
-            <option value="dense">Dense</option>
-            <option value="minimal">Minimal</option>
-            <option value="blocks">Blocks</option>
-            <option value="standard-dots">Dots</option>
-            <option value="melding-dots">Melding Dots</option>
-            <option value="ascii-characters-minimal">ASCII Characters minimal</option>
-            <option value="ascii-characters-normal">ASCII Characters normal</option>
-          </select>
-        </div>
+        {shaderType === "cell" && (
+          <div style={{ marginBottom: "10px" }}>
+            <label style={{ display: "block", marginBottom: "3px", fontSize: "11px", fontSize: "11px" }}>Style</label>
+            <select 
+              value={style} 
+              onChange={(e) => setStyle(e.target.value as any)}
+              style={{
+                width: "100%",
+                padding: "5px",
+                background: "#333",
+                color: "white",
+                border: "1px solid #555",
+                borderRadius: "4px"
+              }}
+            >
+              <option value="standard">Standard</option>
+              <option value="dense">Dense</option>
+              <option value="minimal">Minimal</option>
+              <option value="blocks">Blocks</option>
+              <option value="standard-dots">Dots</option>
+              <option value="melding-dots">Melding Dots</option>
+              <option value="ascii-characters-minimal">ASCII Characters minimal</option>
+              <option value="ascii-characters-normal">ASCII Characters normal</option>
+            </select>
+          </div>
+        )}
+
+        {shaderType === "true-ascii" && (
+          <div style={{ marginBottom: "10px" }}>
+            <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>Character Set</label>
+            <select 
+              value={characterSet} 
+              onChange={(e) => setCharacterSet(Number(e.target.value))}
+              style={{
+                width: "100%",
+                padding: "5px",
+                background: "#333",
+                color: "white",
+                border: "1px solid #555",
+                borderRadius: "4px"
+              }}
+            >
+              <option value={0}>Basic ( .:-=+*#%@)</option>
+              <option value={1}>Short ( .:;+=xX$&#)</option>
+              <option value={2}>Medium ( .'`^",:;Il!...)</option>
+              <option value={3}>Extended ( .",:;!~+-&lt;&gt;i...)</option>
+              <option value={4}>Classic ( .:-=+*#%@)</option>
+              <option value={5}>Simple Ramp ( ._-=+*#%@)</option>
+              <option value={6}>Blocks ( ░▒▓█)</option>
+              <option value={7}>Blocks Extended ( ·:░▒▓█)</option>
+              <option value={8}>Braille Blocks ( ⡀⡄⡆⡇⣇⣧⣷⣿)</option>
+              <option value={9}>Numeric ( 1234567890)</option>
+              <option value={10}>Alphanumeric ( 0123456789AB...)</option>
+              <option value={11}>Binary ( 01)</option>
+              <option value={12}>Matrix ( .0123456789)</option>
+              <option value={13}>Retro ( .:*oe&#%@)</option>
+              <option value={14}>Minimal ( .-+=#)</option>
+              <option value={15}>Dots ( .·•○●)</option>
+              <option value={16}>Lines ( -_=≡═)</option>
+            </select>
+          </div>
+        )}
 
         <div style={{ marginBottom: "10px" }}>
           <label style={{ display: "block", marginBottom: "3px", fontSize: "11px", fontSize: "11px" }}>
@@ -509,7 +630,7 @@ export function EffectScene() {
           />
         </div>
 
-        {style === "melding-dots" && (
+        {style === "melding-dots" && shaderType === "cell" && (
           <div style={{ marginBottom: "10px" }}>
             <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
               Blur: {blur.toFixed(1)}
@@ -526,7 +647,7 @@ export function EffectScene() {
           </div>
         )}
 
-        {(style === "standard-dots" || style === "melding-dots") && (
+        {(style === "standard-dots" || style === "melding-dots") && shaderType === "cell" && (
           <div style={{ marginBottom: "10px" }}>
             <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
               Min Size: {minSize.toFixed(1)}
@@ -543,7 +664,7 @@ export function EffectScene() {
           </div>
         )}
 
-        {(style === "standard-dots" || style === "melding-dots") && (
+        {(style === "standard-dots" || style === "melding-dots") && shaderType === "cell" && (
           <div style={{ marginBottom: "10px" }}>
             <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
               Max Size: {maxSize.toFixed(1)}
@@ -564,31 +685,31 @@ export function EffectScene() {
           <label style={{ display: "block", marginBottom: "10px", fontWeight: "bold", color: "#aaf" }}>
             Cell Density
           </label>
-          <div style={{ marginBottom: "10px" }}>
-            <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
-              Density Mask
-            </label>
-            <select 
-              value={densityMask} 
-              onChange={(e) => setDensityMask(e.target.value as any)}
-              style={{
-                width: "100%",
-                padding: "5px",
-                background: "#333",
-                color: "white",
-                border: "1px solid #555",
-                borderRadius: "4px",
-                marginBottom: "10px"
-              }}
-            >
-              <option value="none">None</option>
-              <option value="uniform">Uniform</option>
-              <option value="gradient-linear">Gradient: Linear</option>
-              <option value="gradient-radial">Gradient: Radial</option>
-              <option value="logo-mask">Logo Mask</option>
-              <option value="image-mask">Custom Image Mask</option>
-            </select>
-          </div>
+        <div style={{ marginBottom: "10px" }}>
+          <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
+            Density Mask
+          </label>
+          <select 
+            value={densityMask} 
+            onChange={(e) => setDensityMask(e.target.value as any)}
+            style={{
+              width: "100%",
+              padding: "5px",
+              background: "#333",
+              color: "white",
+              border: "1px solid #555",
+              borderRadius: "4px",
+              marginBottom: "10px"
+            }}
+          >
+            <option value="none">None</option>
+            <option value="uniform">Uniform</option>
+            <option value="gradient-linear">Gradient: Linear</option>
+            <option value="gradient-radial">Gradient: Radial</option>
+            <option value="logo-mask">Logo Mask</option>
+            <option value="image-mask">Custom Image Mask</option>
+          </select>
+        </div>
           {densityMask === "gradient-linear" && (
             <div style={{ marginBottom: "10px" }}>
               <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
@@ -1087,8 +1208,16 @@ export function EffectScene() {
       </div>
 
       <Canvas
+        id="canvas-container"
         camera={{ position: [0, 0, 5], fov: 50 }}
-        style={{ background: (showImage && !showCanvasBackground) ? "transparent" : backgroundColor }}
+        style={{ 
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          background: (showImage && !showCanvasBackground) ? "transparent" : backgroundColor,
+        }}
         gl={{ preserveDrawingBuffer: true, alpha: true }}
       >
         <color attach="background" args={(showImage && !showCanvasBackground) ? ["transparent"] : [backgroundColor]} />
@@ -1105,69 +1234,106 @@ export function EffectScene() {
         <OrbitControls enableDamping enableZoom={true} />
 
         {/* ASCII Effect with PostFX */}
-        <EffectComposer>
-          <AsciiEffectWithMask
-            densityMask={densityMask}
-            maskImageUrl={maskImageUrl}
-            maskScale={maskScale / 2.0}
-            onMaskLoad={setMaskDimensions}
-            style={style}
-            cellSize={cellSize}
-            invert={invert}
-            color={colorMode}
-            blur={blur}
-            minSize={minSize}
-            maxSize={maxSize}
-            resolution={resolution}
-            mousePos={mousePos}
-            postfx={{
-              cellSpacing: cellSpacing,
-              scanlineIntensity: 0,
-              scanlineCount: 200,
-              targetFPS: 0,
-              jitterIntensity: 0,
-              jitterSpeed: 1,
-              mouseGlowEnabled: false,
-              mouseGlowRadius: 200,
-              mouseGlowIntensity: 1.5,
-              vignetteIntensity: 0,
-              vignetteRadius: 0.8,
-              colorPalette: "original",
-              curvature: 0,
-              aberrationStrength: 0,
-              noiseIntensity: 0,
-              noiseScale: 1,
-              noiseSpeed: 1,
-              waveAmplitude: 0,
-              waveFrequency: 10,
-              waveSpeed: 1,
-              glitchIntensity: 0,
-              glitchFrequency: 0,
-              brightnessAdjust: brightness,
-              contrastAdjust: contrast,
-              saturationAdjust: saturation,
-              backgroundColor: [
-                parseInt(backgroundColor.slice(1, 3), 16) / 255,
-                parseInt(backgroundColor.slice(3, 5), 16) / 255,
-                parseInt(backgroundColor.slice(5, 7), 16) / 255
-              ],
-              cellDensity: cellDensity,
-              randomSeed: randomSeed,
-              densityMask: densityMask === "none" ? 0 : densityMask === "uniform" ? 1 : densityMask === "gradient-linear" ? (gradientDirection === "up" ? 2 : gradientDirection === "down" ? 3 : gradientDirection === "left" ? 4 : 5) : densityMask === "gradient-radial" ? 6 : (densityMask === "logo-mask" || densityMask === "image-mask") ? 7 : 0,
-              gradientMidpoint: gradientMidpoint,
-              densityStart: densityStart,
-              densityEnd: densityEnd,
-              maskOffsetX: maskOffsetX,
-              maskOffsetY: maskOffsetY,
-              makeBlackAlpha: makeBlackAlpha,
-            }}
-          />
-        </EffectComposer>
+        {shaderType === "cell" ? (
+          <EffectComposer>
+            <AsciiEffectWithMask
+              densityMask={densityMask}
+              maskImageUrl={maskImageUrl}
+              maskScale={maskScale / 2.0}
+              onMaskLoad={setMaskDimensions}
+              style={style}
+              cellSize={cellSize}
+              invert={invert}
+              color={colorMode}
+              blur={blur}
+              minSize={minSize}
+              maxSize={maxSize}
+              resolution={resolution}
+              mousePos={mousePos}
+              postfx={{
+                cellSpacing: cellSpacing,
+                scanlineIntensity: 0,
+                scanlineCount: 200,
+                targetFPS: 0,
+                jitterIntensity: 0,
+                jitterSpeed: 1,
+                mouseGlowEnabled: false,
+                mouseGlowRadius: 200,
+                mouseGlowIntensity: 1.5,
+                vignetteIntensity: 0,
+                vignetteRadius: 0.8,
+                colorPalette: "original",
+                curvature: 0,
+                aberrationStrength: 0,
+                noiseIntensity: 0,
+                noiseScale: 1,
+                noiseSpeed: 1,
+                waveAmplitude: 0,
+                waveFrequency: 10,
+                waveSpeed: 1,
+                glitchIntensity: 0,
+                glitchFrequency: 0,
+                brightnessAdjust: brightness,
+                contrastAdjust: contrast,
+                saturationAdjust: saturation,
+                backgroundColor: [
+                  parseInt(backgroundColor.slice(1, 3), 16) / 255,
+                  parseInt(backgroundColor.slice(3, 5), 16) / 255,
+                  parseInt(backgroundColor.slice(5, 7), 16) / 255
+                ],
+                cellDensity: cellDensity,
+                randomSeed: randomSeed,
+                densityMask: densityMask === "none" ? 0 : densityMask === "uniform" ? 1 : densityMask === "gradient-linear" ? (gradientDirection === "up" ? 2 : gradientDirection === "down" ? 3 : gradientDirection === "left" ? 4 : 5) : densityMask === "gradient-radial" ? 6 : (densityMask === "logo-mask" || densityMask === "image-mask") ? 7 : 0,
+                gradientMidpoint: gradientMidpoint,
+                densityStart: densityStart,
+                densityEnd: densityEnd,
+                maskOffsetX: maskOffsetX,
+                maskOffsetY: maskOffsetY,
+                makeBlackAlpha: makeBlackAlpha,
+              }}
+            />
+          </EffectComposer>
+        ) : (
+          <ASCIIRendererInner onRenderData={handleAsciiRenderData} />
+        )}
       </Canvas>
+
+      {/* ASCII Canvas Overlay - rendered outside Canvas */}
+      {shaderType === "true-ascii" && (
+        <ASCIICanvas
+          key="ascii-canvas"
+          cellSize={cellSize}
+          invert={invert}
+          colorMode={colorMode}
+          brightness={brightness}
+          contrast={contrast}
+          saturation={saturation}
+          characterSet={characterSet}
+          cellSpacing={cellSpacing}
+          cellDensity={cellDensity}
+          randomSeed={randomSeed}
+          densityMask={densityMask}
+          densityStart={densityStart}
+          densityEnd={densityEnd}
+          gradientDirection={gradientDirection}
+          gradientMidpoint={gradientMidpoint}
+          maskImageData={asciiMaskImageData}
+          maskWidth={maskDimensions?.width ?? 0}
+          maskHeight={maskDimensions?.height ?? 0}
+          maskScale={maskScale}
+          maskOffsetX={maskOffsetX}
+          maskOffsetY={maskOffsetY}
+          imageData={asciiImageData}
+          width={asciiCanvasSize.width}
+          height={asciiCanvasSize.height}
+          logicalWidth={asciiLogicalSize.width}
+          logicalHeight={asciiLogicalSize.height}
+        />
+      )}
 
       {/* Dimensions Display */}
       {(showImage || true) && (
-        <div style={{
+        <div id="dimensions-display" style={{
           position: "absolute",
           bottom: "20px",
           right: "20px",
