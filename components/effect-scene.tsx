@@ -308,8 +308,45 @@ export function EffectScene() {
         bgElement.style.display = 'none'
       }
       
-      // Regular canvas capture at viewport size
       requestAnimationFrame(() => {
+        // If True ASCII shader, composite the ASCII canvas on top
+        if (shaderType === "true-ascii") {
+          const asciiCanvas = Array.from(containerRef.current?.querySelectorAll('canvas') || []).find(
+            c => (c as HTMLCanvasElement).style.zIndex === '10'
+          ) as HTMLCanvasElement
+          
+          if (asciiCanvas) {
+            // Create composite canvas
+            const compositeCanvas = document.createElement('canvas')
+            compositeCanvas.width = asciiCanvas.width
+            compositeCanvas.height = asciiCanvas.height
+            const ctx = compositeCanvas.getContext('2d')
+            
+            if (ctx) {
+              // Draw ASCII canvas (it has black background and characters)
+              ctx.drawImage(asciiCanvas, 0, 0)
+              
+              compositeCanvas.toBlob((blob) => {
+                // Restore background visibility
+                if (bgElement && originalDisplay !== undefined) {
+                  bgElement.style.display = originalDisplay
+                }
+                
+                if (blob) {
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `ascii-art-viewport-${Date.now()}.png`
+                  a.click()
+                  URL.revokeObjectURL(url)
+                }
+              }, 'image/png')
+              return
+            }
+          }
+        }
+        
+        // Regular canvas capture for Cell shader
         canvas.toBlob((blob) => {
           // Restore background visibility
           if (bgElement && originalDisplay !== undefined) {
@@ -344,10 +381,63 @@ export function EffectScene() {
     
     // Wait for next frame to ensure canvas is rendered
     requestAnimationFrame(() => {
-      // Account for device pixel ratio
       const dpr = window.devicePixelRatio || 1
       
-      // Create temporary canvas at media dimensions
+      // For True ASCII shader, use the ASCII canvas
+      if (shaderType === "true-ascii") {
+        const asciiCanvas = Array.from(containerRef.current?.querySelectorAll('canvas') || []).find(
+          c => (c as HTMLCanvasElement).style.zIndex === '10'
+        ) as HTMLCanvasElement
+        
+        if (asciiCanvas) {
+          // Create temporary canvas at media dimensions
+          const tempCanvas = document.createElement('canvas')
+          tempCanvas.width = Math.round(mediaBounds.width)
+          tempCanvas.height = Math.round(mediaBounds.height)
+          const ctx = tempCanvas.getContext('2d')
+          
+          if (!ctx) {
+            if (bgElement && originalDisplay !== undefined) {
+              bgElement.style.display = originalDisplay
+            }
+            return
+          }
+          
+          ctx.imageSmoothingEnabled = true
+          ctx.imageSmoothingQuality = 'high'
+          
+          // Draw only the media bounds area from ASCII canvas
+          ctx.drawImage(
+            asciiCanvas,
+            Math.round(mediaBounds.x * dpr), // source x
+            Math.round(mediaBounds.y * dpr), // source y
+            Math.round(mediaBounds.width * dpr), // source width
+            Math.round(mediaBounds.height * dpr), // source height
+            0, // destination x
+            0, // destination y
+            Math.round(mediaBounds.width), // destination width
+            Math.round(mediaBounds.height) // destination height
+          )
+          
+          tempCanvas.toBlob((blob) => {
+            if (bgElement && originalDisplay !== undefined) {
+              bgElement.style.display = originalDisplay
+            }
+            
+            if (blob) {
+              const url = URL.createObjectURL(blob)
+              const a = document.createElement('a')
+              a.href = url
+              a.download = `ascii-media-${Math.round(mediaBounds.width)}x${Math.round(mediaBounds.height)}-${Date.now()}.png`
+              a.click()
+              URL.revokeObjectURL(url)
+            }
+          }, 'image/png')
+          return
+        }
+      }
+      
+      // For Cell shader, use the WebGL canvas
       const tempCanvas = document.createElement('canvas')
       tempCanvas.width = Math.round(mediaBounds.width)
       tempCanvas.height = Math.round(mediaBounds.height)
