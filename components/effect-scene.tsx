@@ -3,21 +3,23 @@
 import { useState, useEffect, useRef } from "react"
 import { Canvas, useFrame, useLoader, useThree } from "@react-three/fiber"
 import { EffectComposer } from "@react-three/postprocessing"
-import { OrbitControls } from "@react-three/drei"
+import { OrbitControls, useGLTF } from "@react-three/drei"
 import { Vector2, TextureLoader, Box3, Vector3 } from "three"
 import * as THREE from "three"
 import { AsciiEffect } from "./ascii-effect"
 import { ASCIIRendererInner } from "./ascii-renderer-inner"
 import { ASCIICanvas } from "./ascii-canvas"
+import { getDefaultAsset } from "./3d-assets"
 
 function RotatingMesh({ onBoundsUpdate }: { onBoundsUpdate?: (bounds: { x: number; y: number; width: number; height: number }) => void }) {
   const meshRef = useRef<THREE.Mesh>(null)
   const { camera, size, gl } = useThree()
+  const asset = getDefaultAsset()
 
   useFrame((state, delta) => {
     if (meshRef.current) {
-      meshRef.current.rotation.x += delta * 0.3
-      meshRef.current.rotation.y += delta * 0.5
+      meshRef.current.rotation.x += delta * asset.rotation.x
+      meshRef.current.rotation.y += delta * asset.rotation.y
 
       // Calculate screen bounds
       if (onBoundsUpdate) {
@@ -42,9 +44,13 @@ function RotatingMesh({ onBoundsUpdate }: { onBoundsUpdate?: (bounds: { x: numbe
   })
 
   return (
-    <mesh ref={meshRef} scale={1}>
-      <torusKnotGeometry args={[0.8, 0.3, 100, 16]} />
-      <meshStandardMaterial color="#917aff" roughness={0.3} metalness={0.1} />
+    <mesh ref={meshRef} scale={asset.scale}>
+      <torusKnotGeometry args={asset.args as [number, number, number, number]} />
+      <meshStandardMaterial 
+        color={asset.color} 
+        roughness={asset.material.roughness} 
+        metalness={asset.material.metalness} 
+      />
     </mesh>
   )
 }
@@ -86,6 +92,47 @@ function ImagePlane({ imageUrl, dimensions, onBoundsUpdate }: { imageUrl: string
       <planeGeometry args={[planeWidth, planeHeight]} />
       <meshBasicMaterial map={texture} transparent={true} alphaTest={0.01} />
     </mesh>
+  )
+}
+
+function ModelViewer({ modelUrl, onBoundsUpdate }: { modelUrl: string | null; onBoundsUpdate?: (bounds: { x: number; y: number; width: number; height: number }) => void }) {
+  const meshRef = useRef<THREE.Group>(null)
+  const { camera, size } = useThree()
+  const gltf = modelUrl ? useGLTF(modelUrl) : null
+
+  useFrame((state, delta) => {
+    if (meshRef.current) {
+      // Rotate the model
+      meshRef.current.rotation.y += delta * 0.5
+
+      // Calculate screen bounds
+      if (onBoundsUpdate) {
+        const box = new Box3().setFromObject(meshRef.current)
+        const min = new Vector3()
+        const max = new Vector3()
+        box.getCenter(min)
+        box.getSize(max)
+        
+        // Project to screen coordinates
+        const minScreen = min.clone().sub(max.clone().multiplyScalar(0.5)).project(camera)
+        const maxScreen = min.clone().add(max.clone().multiplyScalar(0.5)).project(camera)
+        
+        const x = (minScreen.x * 0.5 + 0.5) * size.width
+        const y = (1 - (maxScreen.y * 0.5 + 0.5)) * size.height
+        const width = (maxScreen.x - minScreen.x) * 0.5 * size.width
+        const height = (maxScreen.y - minScreen.y) * 0.5 * size.height
+        
+        onBoundsUpdate({ x, y, width, height })
+      }
+    }
+  })
+
+  if (!modelUrl || !gltf) return null
+
+  return (
+    <group ref={meshRef} scale={9}>
+      <primitive object={gltf.scene} />
+    </group>
   )
 }
 
@@ -155,6 +202,9 @@ export function EffectScene() {
   const [maskRenderedSize, setMaskRenderedSize] = useState<{ width: number; height: number } | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [showImage, setShowImage] = useState(false)
+  const [modelUrl, setModelUrl] = useState<string | null>("/1-Logo.gltf")
+  const [showModel, setShowModel] = useState(true)
+  const [isUserUploadedModel, setIsUserUploadedModel] = useState(false)
   const [showBackgroundImage, setShowBackgroundImage] = useState(false)
   const [showCanvasBackground, setShowCanvasBackground] = useState(true)
   const [makeBlackAlpha, setMakeBlackAlpha] = useState(false)
@@ -296,6 +346,25 @@ export function EffectScene() {
     }
     setImageUrl(null)
     setShowImage(false)
+  }
+
+  const handleModelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      const url = URL.createObjectURL(file)
+      setModelUrl(url)
+      setShowModel(true)
+      setIsUserUploadedModel(true)
+    }
+  }
+
+  const clearModel = () => {
+    if (modelUrl && isUserUploadedModel) {
+      URL.revokeObjectURL(modelUrl)
+    }
+    setModelUrl("/1-Logo.gltf")
+    setShowModel(true)
+    setIsUserUploadedModel(false)
   }
 
   const captureScreenshot = () => {
@@ -588,24 +657,67 @@ export function EffectScene() {
         width: "360px"
       }}>
         <div style={{ marginBottom: "15px", paddingBottom: "15px", borderBottom: "1px solid #555" }}>
-          <label style={{ display: "block", marginBottom: "5px", fontSize: "11px" }}>Shader Type</label>
-          <select 
-            value={shaderType} 
-            onChange={(e) => setShaderType(e.target.value as "cell" | "true-ascii")}
-            style={{
-              width: "100%",
-              padding: "8px",
-              background: "#333",
-              color: "white",
-              border: "1px solid #555",
-              borderRadius: "4px",
-              fontSize: "13px",
-              fontWeight: "bold"
-            }}
-          >
-            <option value="cell">Cell Shader</option>
-            <option value="true-ascii">ASCII Shader</option>
-          </select>
+          <h3 style={{ margin: "0 0 10px 0", fontSize: "13px" }}>Shader Type</h3>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button
+              onClick={() => setShaderType("cell")}
+              onMouseEnter={(e) => {
+                if (shaderType !== "cell") {
+                  e.currentTarget.style.background = "#444";
+                  e.currentTarget.style.borderColor = "#3675f8";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (shaderType !== "cell") {
+                  e.currentTarget.style.background = "#333";
+                  e.currentTarget.style.borderColor = "#555";
+                }
+              }}
+              style={{
+                flex: 1,
+                padding: "10px",
+                background: shaderType === "cell" ? "#3675f8" : "#333",
+                color: "white",
+                border: shaderType === "cell" ? "2px solid #3675f8" : "1px solid #555",
+                borderRadius: "4px",
+                fontSize: "13px",
+                fontWeight: "bold",
+                cursor: "pointer",
+                transition: "all 0.2s"
+              }}
+            >
+              Cell Shader
+            </button>
+            <button
+              onClick={() => setShaderType("true-ascii")}
+              onMouseEnter={(e) => {
+                if (shaderType !== "true-ascii") {
+                  e.currentTarget.style.background = "#444";
+                  e.currentTarget.style.borderColor = "#3675f8";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (shaderType !== "true-ascii") {
+                  e.currentTarget.style.background = "#333";
+                  e.currentTarget.style.borderColor = "#555";
+                }
+              }}
+              style={{
+                flex: 1,
+                padding: "10px",
+                background: shaderType === "true-ascii" ? "#3675f8" : "#333",
+                color: "white",
+                border: shaderType === "true-ascii" ? "2px solid #3675f8" : "1px solid #555",
+                borderRadius: "4px",
+                fontSize: "13px",
+                fontWeight: "bold",
+                cursor: "pointer",
+                transition: "all 0.2s"
+              }}
+            >
+              ASCII Shader
+            </button>
+          </div>
         </div>
         
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
@@ -701,7 +813,7 @@ export function EffectScene() {
             max="32" 
             value={cellSize}
             onChange={(e) => setCellSize(Number(e.target.value))}
-            style={{ width: "100%", height: "4px" }}
+            style={{ width: "100%", height: "4px", accentColor: "#3675f8" }}
           />
         </div>
 
@@ -716,7 +828,7 @@ export function EffectScene() {
             step="0.01"
             value={cellSpacing}
             onChange={(e) => setCellSpacing(Number(e.target.value))}
-            style={{ width: "100%", height: "4px" }}
+            style={{ width: "100%", height: "4px", accentColor: "#3675f8" }}
           />
         </div>
 
@@ -732,7 +844,7 @@ export function EffectScene() {
               step="0.1"
               value={blur}
               onChange={(e) => setBlur(Number(e.target.value))}
-              style={{ width: "100%", height: "4px" }}
+              style={{ width: "100%", height: "4px", accentColor: "#3675f8" }}
             />
           </div>
         )}
@@ -749,7 +861,7 @@ export function EffectScene() {
               step="0.1"
               value={minSize}
               onChange={(e) => setMinSize(Number(e.target.value))}
-              style={{ width: "100%", height: "4px" }}
+              style={{ width: "100%", height: "4px", accentColor: "#3675f8" }}
             />
           </div>
         )}
@@ -766,13 +878,13 @@ export function EffectScene() {
               step="0.1"
               value={maxSize}
               onChange={(e) => setMaxSize(Number(e.target.value))}
-              style={{ width: "100%", height: "4px" }}
+              style={{ width: "100%", height: "4px", accentColor: "#3675f8" }}
             />
           </div>
         )}
 
         <div style={{ marginBottom: "20px", paddingBottom: "15px", borderBottom: "1px solid #555" }}>
-          <label style={{ display: "block", marginBottom: "10px", fontWeight: "bold", color: "#aaf" }}>
+          <label style={{ display: "block", marginBottom: "10px", fontWeight: "bold", color: "white" }}>
             Cell Density
           </label>
         <div style={{ marginBottom: "10px" }}>
@@ -908,7 +1020,7 @@ export function EffectScene() {
                   step="0.1"
                   value={maskScale}
                   onChange={(e) => setMaskScale(Number(e.target.value))}
-                  style={{ width: "100%", height: "4px" }}
+                  style={{ width: "100%", height: "4px", accentColor: "#3675f8" }}
                 />
               </div>
               <div style={{ marginBottom: "10px" }}>
@@ -922,7 +1034,7 @@ export function EffectScene() {
                   step="0.01"
                   value={maskOffsetX}
                   onChange={(e) => setMaskOffsetX(Number(e.target.value))}
-                  style={{ width: "100%", height: "4px" }}
+                  style={{ width: "100%", height: "4px", accentColor: "#3675f8" }}
                 />
               </div>
               <div style={{ marginBottom: "10px" }}>
@@ -936,7 +1048,7 @@ export function EffectScene() {
                   step="0.01"
                   value={maskOffsetY}
                   onChange={(e) => setMaskOffsetY(Number(e.target.value))}
-                  style={{ width: "100%", height: "4px" }}
+                  style={{ width: "100%", height: "4px", accentColor: "#3675f8" }}
                 />
               </div>
               <div style={{ marginBottom: "10px" }}>
@@ -949,7 +1061,7 @@ export function EffectScene() {
                   max="100" 
                   value={densityStart}
                   onChange={(e) => setDensityStart(Number(e.target.value))}
-                  style={{ width: "100%", height: "4px" }}
+                  style={{ width: "100%", height: "4px", accentColor: "#3675f8" }}
                 />
               </div>
               <div style={{ marginBottom: "10px" }}>
@@ -962,7 +1074,7 @@ export function EffectScene() {
                   max="100" 
                   value={densityEnd}
                   onChange={(e) => setDensityEnd(Number(e.target.value))}
-                  style={{ width: "100%", height: "4px" }}
+                  style={{ width: "100%", height: "4px", accentColor: "#3675f8" }}
                 />
               </div>
             </>
@@ -979,7 +1091,7 @@ export function EffectScene() {
                   max="100" 
                   value={densityStart}
                   onChange={(e) => setDensityStart(Number(e.target.value))}
-                  style={{ width: "100%", height: "4px" }}
+                  style={{ width: "100%", height: "4px", accentColor: "#3675f8" }}
                 />
               </div>
               <div style={{ marginBottom: "10px" }}>
@@ -992,7 +1104,7 @@ export function EffectScene() {
                   max="100" 
                   value={densityEnd}
                   onChange={(e) => setDensityEnd(Number(e.target.value))}
-                  style={{ width: "100%", height: "4px" }}
+                  style={{ width: "100%", height: "4px", accentColor: "#3675f8" }}
                 />
               </div>
               <div style={{ marginBottom: "10px" }}>
@@ -1006,7 +1118,7 @@ export function EffectScene() {
                   step="0.01"
                   value={gradientMidpoint}
                   onChange={(e) => setGradientMidpoint(Number(e.target.value))}
-                  style={{ width: "100%", height: "4px" }}
+                  style={{ width: "100%", height: "4px", accentColor: "#3675f8" }}
                 />
               </div>
             </>
@@ -1022,30 +1134,40 @@ export function EffectScene() {
                 max="100" 
                 value={cellDensity}
                 onChange={(e) => setCellDensity(Number(e.target.value))}
-                style={{ width: "100%", height: "4px" }}
+                style={{ width: "100%", height: "4px", accentColor: "#3675f8" }}
               />
             </div>
           )}
           {densityMask !== "none" && (
             <button
               onClick={() => setRandomSeed(Math.random() * 1000)}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "#2563eb";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "#3675f8";
+              }}
               style={{
                 width: "100%",
                 padding: "6px",
-                background: "#7a5fc9",
+                background: "#3675f8",
                 color: "white",
                 border: "none",
                 borderRadius: "4px",
                 cursor: "pointer",
-                fontSize: "12px"
+                fontSize: "12px",
+                minHeight: "32px",
+                fontWeight: 600,
+                transition: "all 0.2s"
               }}
             >
-              🎲 Randomise Pattern
+              Randomise Pattern
             </button>
           )}
         </div>
 
         <div style={{ marginBottom: "10px" }}>
+          <h3 style={{ margin: "0 0 10px 0", fontSize: "13px" }}>Frame Controls</h3>
           <label style={{ display: "block", marginBottom: "3px", fontSize: "11px" }}>
             Background Color
           </label>
@@ -1073,7 +1195,7 @@ export function EffectScene() {
             step="0.01"
             value={brightness}
             onChange={(e) => setBrightness(Number(e.target.value))}
-            style={{ width: "100%", height: "4px" }}
+            style={{ width: "100%", height: "4px", accentColor: "#3675f8" }}
           />
         </div>
 
@@ -1088,7 +1210,7 @@ export function EffectScene() {
             step="0.01"
             value={contrast}
             onChange={(e) => setContrast(Number(e.target.value))}
-            style={{ width: "100%", height: "4px" }}
+            style={{ width: "100%", height: "4px", accentColor: "#3675f8" }}
           />
         </div>
 
@@ -1103,7 +1225,7 @@ export function EffectScene() {
             step="0.01"
             value={saturation}
             onChange={(e) => setSaturation(Number(e.target.value))}
-            style={{ width: "100%", height: "4px" }}
+            style={{ width: "100%", height: "4px", accentColor: "#3675f8" }}
           />
         </div>
 
@@ -1156,87 +1278,131 @@ export function EffectScene() {
         </div>
 
         <div style={{ marginTop: "20px", paddingTop: "20px", borderTop: "1px solid #555" }}>
-          <label style={{ display: "block", marginBottom: "10px", fontWeight: "bold" }}>
-            Export
-          </label>
-          <button
-            onClick={captureScreenshot}
-            style={{
-              width: "100%",
-              padding: "8px",
-              background: "#4a9eff",
-              color: "white",
-              border: "none",
-              borderRadius: "4px",
-              cursor: "pointer",
-              fontSize: "12px",
-              marginBottom: "8px"
-            }}
-          >
-            📷 Capture Window
-          </button>
-          {mediaBounds && (
+          <h3 style={{ margin: "0 0 10px 0", fontSize: "13px" }}>Export</h3>
+          <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
+            {mediaBounds && (
+              <button
+                onClick={captureMedia}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "#2563eb";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "#3675f8";
+                }}
+                style={{
+                  flex: 1,
+                  padding: "8px",
+                  background: "#3675f8",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  fontSize: "13px",
+                  minHeight: "40px",
+                  fontWeight: 600,
+                  transition: "all 0.2s"
+                }}
+              >
+                Capture Media
+              </button>
+            )}
             <button
-              onClick={captureMedia}
+              onClick={captureScreenshot}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "#444";
+                e.currentTarget.style.borderColor = "#3675f8";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "rgb(51, 51, 51)";
+                e.currentTarget.style.borderColor = "#555";
+              }}
               style={{
-                width: "100%",
+                flex: 1,
                 padding: "8px",
-                background: "#6ac",
+                background: "rgb(51, 51, 51)",
                 color: "white",
-                border: "none",
+                border: "1px solid #555",
                 borderRadius: "4px",
                 cursor: "pointer",
-                fontSize: "12px",
-                marginBottom: "8px"
+                fontSize: "13px",
+                minHeight: "40px",
+                fontWeight: 600,
+                transition: "all 0.2s"
               }}
             >
-              📐 Capture Media ({Math.round(mediaBounds.width)}×{Math.round(mediaBounds.height)})
+              Capture Window
             </button>
-          )}
+          </div>
           {!isRecording ? (
             <button
               onClick={startRecording}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "#a0150a";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "#C81A0D";
+              }}
               style={{
                 width: "100%",
                 padding: "8px",
-                background: "#ff4a4a",
+                background: "#C81A0D",
                 color: "white",
                 border: "none",
                 borderRadius: "4px",
                 cursor: "pointer",
-                fontSize: "12px"
+                fontSize: "13px",
+                minHeight: "40px",
+                fontWeight: 600,
+                transition: "all 0.2s"
               }}
             >
-              🔴 Start Recording
+              Start Recording
             </button>
           ) : (
             <button
               onClick={stopRecording}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "#a0150a";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "#C81A0D";
+              }}
               style={{
                 width: "100%",
                 padding: "8px",
-                background: "#ff9900",
+                background: "#C81A0D",
                 color: "white",
                 border: "none",
                 borderRadius: "4px",
                 cursor: "pointer",
-                fontSize: "12px",
+                fontSize: "13px",
+                minHeight: "40px",
+                fontWeight: 600,
+                transition: "all 0.2s",
                 animation: "pulse 1s infinite"
               }}
             >
-              ⏹️ Stop Recording
+              Stop Recording
             </button>
           )}
         </div>
 
         <div style={{ marginTop: "20px", paddingTop: "20px", borderTop: "1px solid #555" }}>
-          <label style={{ display: "block", marginBottom: "10px", fontWeight: "bold" }}>
-            Image Upload
-          </label>
+          <h3 style={{ margin: "0 0 10px 0", fontSize: "13px" }}>Media Upload</h3>
           <input 
             type="file" 
-            accept="image/*"
-            onChange={handleImageUpload}
+            accept="image/*,.glb,.gltf"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) {
+                const fileName = file.name.toLowerCase()
+                if (fileName.endsWith('.glb') || fileName.endsWith('.gltf')) {
+                  handleModelUpload(e)
+                } else {
+                  handleImageUpload(e)
+                }
+              }
+            }}
             style={{
               width: "100%",
               padding: "5px",
@@ -1279,18 +1445,68 @@ export function EffectScene() {
               </label>
               <button
                 onClick={clearImage}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "#444";
+                  e.currentTarget.style.borderColor = "#3675f8";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "rgb(51, 51, 51)";
+                  e.currentTarget.style.borderColor = "#555";
+                }}
                 style={{
                   width: "100%",
                   padding: "5px",
-                  background: "#c44",
+                  background: "rgb(51, 51, 51)",
                   color: "white",
-                  border: "none",
+                  border: "1px solid #555",
                   borderRadius: "4px",
                   cursor: "pointer",
-                  fontSize: "12px"
+                  fontSize: "12px",
+                  minHeight: "32px",
+                  fontWeight: 600,
+                  transition: "all 0.2s"
                 }}
               >
                 Clear Image
+              </button>
+            </div>
+          )}
+          {modelUrl && isUserUploadedModel && (
+            <div>
+              <label style={{ display: "flex", alignItems: "center", cursor: "pointer", marginBottom: "10px" }}>
+                <input 
+                  type="checkbox" 
+                  checked={showModel}
+                  onChange={(e) => setShowModel(e.target.checked)}
+                  style={{ marginRight: "8px" }}
+                />
+                Show 3D Model
+              </label>
+              <button
+                onClick={clearModel}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "#444";
+                  e.currentTarget.style.borderColor = "#3675f8";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "rgb(51, 51, 51)";
+                  e.currentTarget.style.borderColor = "#555";
+                }}
+                style={{
+                  width: "100%",
+                  padding: "5px",
+                  background: "rgb(51, 51, 51)",
+                  color: "white",
+                  border: "1px solid #555",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  fontSize: "12px",
+                  minHeight: "32px",
+                  fontWeight: 600,
+                  transition: "all 0.2s"
+                }}
+              >
+                Clear Model
               </button>
             </div>
           )}
@@ -1318,8 +1534,9 @@ export function EffectScene() {
         <directionalLight position={[-5, 3, -5]} intensity={1.2} />
 
         {/* 3D Model */}
-        {!showImage && <RotatingMesh onBoundsUpdate={setMediaBounds} />}
         {showImage && <ImagePlane imageUrl={imageUrl} dimensions={originalImageSize} onBoundsUpdate={setMediaBounds} />}
+        {!showImage && showModel && modelUrl && <ModelViewer modelUrl={modelUrl} onBoundsUpdate={setMediaBounds} />}
+        {!showImage && !showModel && <RotatingMesh onBoundsUpdate={setMediaBounds} />}
 
         <OrbitControls enableDamping enableZoom={true} />
 
