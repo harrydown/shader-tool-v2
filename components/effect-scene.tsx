@@ -215,6 +215,7 @@ export function EffectScene() {
   const [asciiImageData, setAsciiImageData] = useState<ImageData | null>(null)
   const [asciiCanvasSize, setAsciiCanvasSize] = useState({ width: 0, height: 0 })
   const [asciiLogicalSize, setAsciiLogicalSize] = useState({ width: 0, height: 0 })
+  const [showDimensionsInfo, setShowDimensionsInfo] = useState(true)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const recordedChunksRef = useRef<Blob[]>([])
@@ -654,7 +655,7 @@ export function EffectScene() {
         fontFamily: "monospace",
         fontSize: "11px",
         zIndex: 1000,
-        width: "360px"
+        width: "320px"
       }}>
         <div style={{ marginBottom: "15px", paddingBottom: "15px", borderBottom: "1px solid #555" }}>
           <h3 style={{ margin: "0 0 10px 0", fontSize: "13px" }}>Shader Type</h3>
@@ -1642,8 +1643,8 @@ export function EffectScene() {
       {(showImage || true) && (
         <div id="dimensions-display" style={{
           position: "absolute",
-          bottom: "20px",
-          right: "20px",
+          top: "20px",
+          left: "20px",
           background: "rgba(0, 0, 0, 0.8)",
           padding: "12px 16px",
           borderRadius: "8px",
